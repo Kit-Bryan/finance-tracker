@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { transactions, categories, accounts, merchants } from "@/db/schema";
-import { learnMerchant } from "@/lib/categorizer/rules";
-import { eq, desc, and, gte, lte, sql } from "drizzle-orm";
+import { transactions, categories, accounts } from "@/db/schema";
+import { eq, and, gte, lte, sql, desc, isNull } from "drizzle-orm";
+import { computeFingerprint } from "@/lib/parsers/fingerprint";
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -14,7 +14,7 @@ export async function GET(req: NextRequest) {
   const from = searchParams.get("from");
   const to = searchParams.get("to");
 
-  const conditions = [];
+  const conditions = [isNull(transactions.deletedAt)];
   if (accountId) conditions.push(eq(transactions.accountId, parseInt(accountId)));
   if (categoryId) conditions.push(eq(transactions.categoryId, parseInt(categoryId)));
   if (from) conditions.push(gte(transactions.postedAt, new Date(from)));
@@ -25,6 +25,7 @@ export async function GET(req: NextRequest) {
       id: transactions.id,
       postedAt: transactions.postedAt,
       description: transactions.description,
+      merchantNormalized: transactions.merchantNormalized,
       amount: transactions.amount,
       currency: transactions.currency,
       categoryId: transactions.categoryId,
@@ -51,4 +52,34 @@ export async function GET(req: NextRequest) {
     .where(conditions.length > 0 ? and(...conditions) : undefined);
 
   return NextResponse.json({ rows, total: Number(count), page, limit });
+}
+
+export async function POST(req: NextRequest) {
+  const body = await req.json();
+  const { accountId, description, amount, postedAt, categoryId, notes, currency } = body;
+
+  if (!accountId || !description || amount === undefined || !postedAt) {
+    return NextResponse.json({ error: "accountId, description, amount, postedAt are required" }, { status: 400 });
+  }
+
+  const date = new Date(postedAt);
+  const fingerprint = computeFingerprint(accountId, date, amount, description);
+
+  const [row] = await db
+    .insert(transactions)
+    .values({
+      accountId,
+      description,
+      amount: String(amount),
+      postedAt: date,
+      currency: currency ?? "MYR",
+      fingerprint,
+      categoryId: categoryId ?? null,
+      categorySource: categoryId ? "user" : null,
+      notes: notes ?? null,
+    })
+    .onConflictDoNothing()
+    .returning();
+
+  return NextResponse.json(row, { status: 201 });
 }

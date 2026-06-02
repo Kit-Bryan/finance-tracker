@@ -1,22 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
+import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { transactions } from "@/db/schema";
 import { learnMerchant } from "@/lib/categorizer/rules";
-import { eq } from "drizzle-orm";
 
 export async function PATCH(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const id = parseInt(params.id);
+  const { id: idStr } = await params;
+  const id = parseInt(idStr);
   const body = await req.json();
-  const { categoryId, notes } = body;
+  const { categoryId, notes, description, amount, postedAt } = body;
 
-  const [tx] = await db
-    .select()
-    .from(transactions)
-    .where(eq(transactions.id, id));
-
+  const [tx] = await db.select().from(transactions).where(eq(transactions.id, id));
   if (!tx) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   await db
@@ -24,14 +21,35 @@ export async function PATCH(
     .set({
       ...(categoryId !== undefined ? { categoryId, categorySource: "user", categoryConfidence: "1" } : {}),
       ...(notes !== undefined ? { notes } : {}),
+      ...(description !== undefined ? { description } : {}),
+      ...(amount !== undefined ? { amount: String(parseFloat(amount)) } : {}),
+      ...(postedAt !== undefined ? { postedAt: new Date(postedAt) } : {}),
       updatedAt: new Date(),
     })
     .where(eq(transactions.id, id));
 
-  // Learn from user correction
   if (categoryId !== undefined && tx.description) {
     await learnMerchant(tx.description, categoryId, "user");
   }
+
+  return NextResponse.json({ ok: true });
+}
+
+export async function DELETE(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id: idStr } = await params;
+  const id = parseInt(idStr);
+
+  const [tx] = await db.select().from(transactions).where(eq(transactions.id, id));
+  if (!tx) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+  // Soft delete — keep the row, set deleted_at
+  await db
+    .update(transactions)
+    .set({ deletedAt: new Date(), updatedAt: new Date() })
+    .where(eq(transactions.id, id));
 
   return NextResponse.json({ ok: true });
 }

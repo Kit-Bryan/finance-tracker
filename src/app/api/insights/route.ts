@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { transactions, categories } from "@/db/schema";
-import { sql, eq, and, gte, lte, lt, gt } from "drizzle-orm";
+import { sql, eq, and, gte, lte, isNull } from "drizzle-orm";
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -26,7 +26,8 @@ export async function GET(req: NextRequest) {
       and(
         gte(transactions.postedAt, fromDate),
         lte(transactions.postedAt, toDate),
-        eq(transactions.isTransfer, false)
+        eq(transactions.isTransfer, false),
+        isNull(transactions.deletedAt)
       )
     )
     .groupBy(transactions.categoryId, categories.name, categories.color)

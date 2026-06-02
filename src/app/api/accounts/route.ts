@@ -13,6 +13,6 @@ export async function POST(req: NextRequest) {
   if (!name || !bank) {
     return NextResponse.json({ error: "name and bank are required" }, { status: 400 });
   }
-  const [row] = await db.insert(accounts).values({ name, bank, currency: currency ?? "USD" }).returning();
+  const [row] = await db.insert(accounts).values({ name, bank, currency: currency ?? "MYR" }).returning();
   return NextResponse.json(row, { status: 201 });
 }
