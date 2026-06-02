@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq, isNull, inArray } from "drizzle-orm";
+import { eq, isNull, and, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { transactions, categories } from "@/db/schema";
 import { bulkCategorize } from "@/lib/ai/categorize";
@@ -16,12 +16,16 @@ export async function POST(req: NextRequest) {
   const categoryNames = allCategories.map((c) => c.name);
   const categoryByName = new Map(allCategories.map((c) => [c.name.toLowerCase(), c]));
 
-  // Load target transactions
+  // Load target transactions — never touch soft-deleted rows
   let rows;
   if (transactionIds?.length) {
-    rows = await db.select().from(transactions).where(inArray(transactions.id, transactionIds));
+    rows = await db.select().from(transactions).where(
+      and(inArray(transactions.id, transactionIds), isNull(transactions.deletedAt))
+    );
   } else {
-    rows = await db.select().from(transactions).where(isNull(transactions.categoryId));
+    rows = await db.select().from(transactions).where(
+      and(isNull(transactions.categoryId), isNull(transactions.deletedAt))
+    );
   }
 
   if (rows.length === 0) return NextResponse.json({ updated: 0 });
@@ -51,6 +55,7 @@ export async function POST(req: NextRequest) {
           merchantNormalized: result.merchantName,
           categorySource: "agent",
           categoryConfidence: String(Math.min(1, Math.max(0, result.confidence))),
+          notes: result.note || null,
           updatedAt: new Date(),
         })
         .where(eq(transactions.id, result.id));

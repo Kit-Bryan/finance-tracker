@@ -1,6 +1,6 @@
 import { db } from "@/db";
 import { transactions, categories } from "@/db/schema";
-import { eq, inArray, isNull, isNotNull, desc } from "drizzle-orm";
+import { eq, inArray, isNull, and, desc } from "drizzle-orm";
 
 export interface CategoryExample {
   merchant: string;
@@ -22,7 +22,10 @@ export async function getConfirmedExamples(limit = 40): Promise<CategoryExample[
     })
     .from(transactions)
     .where(
-      inArray(transactions.categorySource, ["user", "rule"])
+      and(
+        inArray(transactions.categorySource, ["user", "rule"]),
+        isNull(transactions.deletedAt)
+      )
     )
     .orderBy(desc(transactions.updatedAt))
     .limit(200); // fetch more, then de-dupe
