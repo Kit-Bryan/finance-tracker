@@ -1,0 +1,60 @@
+import { NextRequest, NextResponse } from "next/server";
+import { eq } from "drizzle-orm";
+import crypto from "crypto";
+import { db } from "@/db";
+import { transactions, importBatches } from "@/db/schema";
+import { categorizeByRules } from "@/lib/categorizer/rules";
+import { PreviewRow } from "@/app/api/parse-preview/route";
+
+interface ForceBody {
+  batchId: number;
+  accountId: number;
+  rows: PreviewRow[];
+}
+
+export async function POST(req: NextRequest) {
+  const { batchId, accountId, rows }: ForceBody = await req.json();
+  if (!batchId || !accountId || !rows?.length) {
+    return NextResponse.json({ error: "Missing fields" }, { status: 400 });
+  }
+
+  let imported = 0;
+
+  for (const row of rows) {
+    const catResult = await categorizeByRules(row.description);
+
+    // Generate a new unique fingerprint so it doesn't conflict
+    const forceFingerprint = crypto
+      .createHash("sha256")
+      .update(`force:${row.fingerprint}:${Date.now()}:${Math.random()}`)
+      .digest("hex")
+      .slice(0, 64);
+
+    try {
+      await db.insert(transactions).values({
+        accountId,
+        batchId,
+        categoryId: catResult.categoryId ?? undefined,
+        postedAt: new Date(row.date),
+        amount: String(row.amount),
+        currency: row.currency,
+        description: row.description,
+        fingerprint: forceFingerprint,
+        categorySource: catResult.source,
+        categoryConfidence: catResult.confidence > 0 ? String(catResult.confidence) : null,
+        rawRow: { date: row.date, description: row.description, amount: row.amount },
+      });
+      imported++;
+    } catch {
+      // ignore
+    }
+  }
+
+  // Update batch imported count
+  const [batch] = await db.select().from(importBatches).where(eq(importBatches.id, batchId));
+  if (batch) {
+    await db.update(importBatches).set({ importedRows: (batch.importedRows ?? 0) + imported }).where(eq(importBatches.id, batchId));
+  }
+
+  return NextResponse.json({ imported });
+}

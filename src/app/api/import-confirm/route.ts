@@ -72,7 +72,7 @@ export async function POST(req: NextRequest) {
 
   // Promote to transactions
   let importedRows = 0;
-  let skippedRows = 0;
+  const skippedDetails: PreviewRow[] = [];
   let errorRows = rows.filter((r) => !!r.parseError).length;
 
   for (const row of validRows) {
@@ -100,7 +100,7 @@ export async function POST(req: NextRequest) {
       if (result.length > 0) {
         importedRows++;
       } else {
-        skippedRows++; // duplicate fingerprint
+        skippedDetails.push(row); // keep full row so user can review
       }
     } catch (e) {
       errorRows++;
@@ -139,6 +139,7 @@ export async function POST(req: NextRequest) {
             merchantNormalized: result.merchantName,
             categorySource: "agent",
             categoryConfidence: String(Math.min(1, Math.max(0, result.confidence))),
+            notes: result.note || null,
             updatedAt: new Date(),
           })
           .where(eq(transactions.id, result.id));
@@ -155,9 +156,11 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({
     batchId: batch.id,
+    accountId,
     totalRows: rows.length,
     importedRows,
-    skippedRows,
+    skippedRows: skippedDetails.length,
+    skippedDetails,       // full row data for user review
     errorRows,
     profileId: resolvedProfileId,
   });

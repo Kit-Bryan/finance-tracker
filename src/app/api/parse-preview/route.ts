@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { eq, and } from "drizzle-orm";
 import crypto from "crypto";
 import { parse as parseCsv } from "csv-parse/sync";
+import { deduplicateFingerprints } from "@/lib/parsers/dedup";
 import { extractPdfText } from "@/lib/parsers/pdf";
 import { suggestCsvProfile, parsePdfStatement, ParsedTransaction, AccountInfo } from "@/lib/ai/parse";
 import { parseCSV } from "@/lib/parsers/csv";
@@ -117,13 +118,14 @@ export async function POST(req: NextRequest) {
     const { transactions, account } = result;
     const { id: accountId, isNew: accountIsNew } = await resolveAccount(account);
 
-    const rows: PreviewRow[] = transactions.map((r) => ({
+    const rawRows: PreviewRow[] = transactions.map((r) => ({
       date: r.date,
       description: r.description,
       amount: r.amount,
       currency: r.currency || "MYR",
       fingerprint: computeFingerprint(accountId, new Date(r.date), r.amount, r.description),
     }));
+    const rows = deduplicateFingerprints(rawRows);
 
     return NextResponse.json({
       type: "pdf",
@@ -182,7 +184,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: `CSV row parse failed: ${e}` }, { status: 422 });
   }
 
-  const rows: PreviewRow[] = allRows.map((r) => ({
+  const rawRows: PreviewRow[] = allRows.map((r) => ({
     date: r.date.toISOString().slice(0, 10),
     description: r.description,
     amount: r.amount,
@@ -190,6 +192,7 @@ export async function POST(req: NextRequest) {
     fingerprint: r.fingerprint,
     parseError: r.parseError,
   }));
+  const rows = deduplicateFingerprints(rawRows);
 
   return NextResponse.json({
     type: "csv",

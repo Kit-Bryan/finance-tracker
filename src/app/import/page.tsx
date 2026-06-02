@@ -50,7 +50,16 @@ export default function ImportPage() {
   const [profileName, setProfileName] = useState("");
 
   const [confirming, setConfirming] = useState(false);
-  const [result, setResult] = useState<{ importedRows: number; skippedRows: number; errorRows: number } | null>(null);
+  const [result, setResult] = useState<{
+    batchId: number;
+    accountId: number;
+    importedRows: number;
+    skippedRows: number;
+    skippedDetails: PreviewRow[];
+    errorRows: number;
+  } | null>(null);
+  const [selectedSkipped, setSelectedSkipped] = useState<Set<number>>(new Set());
+  const [forceImporting, setForceImporting] = useState(false);
 
   const onDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -116,6 +125,27 @@ export default function ImportPage() {
     setConfirming(false);
   }
 
+  async function forceImportSelected() {
+    if (!result || selectedSkipped.size === 0) return;
+    setForceImporting(true);
+    const rows = result.skippedDetails.filter((_, i) => selectedSkipped.has(i));
+    const res = await fetch("/api/import-force", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ batchId: result.batchId, accountId: result.accountId, rows }),
+    });
+    const data = await res.json();
+    // Update result to reflect newly imported rows
+    setResult((r) => r ? {
+      ...r,
+      importedRows: r.importedRows + data.imported,
+      skippedDetails: r.skippedDetails.filter((_, i) => !selectedSkipped.has(i)),
+      skippedRows: r.skippedRows - data.imported,
+    } : r);
+    setSelectedSkipped(new Set());
+    setForceImporting(false);
+  }
+
   function reset() {
     setStep("upload");
     setFile(null);
@@ -123,6 +153,7 @@ export default function ImportPage() {
     setResult(null);
     setParseError("");
     setSaveProfile(true);
+    setSelectedSkipped(new Set());
   }
 
   const validRows = preview?.rows.filter((r) => !r.parseError) ?? [];
@@ -350,27 +381,100 @@ export default function ImportPage() {
 
       {/* ── STEP: DONE ───────────────────────────────────────── */}
       {step === "done" && result && (
-        <div className="fade-up fade-up-2">
-          <div style={{
-            background: "var(--bg-2)", border: "1px solid var(--border)", borderRadius: 10,
-            padding: "48px 32px", textAlign: "center",
-          }}>
-            <div style={{ fontSize: 44, marginBottom: 16 }}>✓</div>
-            <h2 style={{ fontFamily: "var(--font-syne)", fontSize: 22, fontWeight: 700, color: "var(--income)", marginBottom: 24 }}>
+        <div className="fade-up fade-up-2" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {/* Summary */}
+          <div style={{ background: "var(--bg-2)", border: "1px solid var(--border)", borderRadius: 10, padding: "32px", textAlign: "center" }}>
+            <div style={{ fontSize: 36, marginBottom: 12 }}>✓</div>
+            <h2 style={{ fontFamily: "var(--font-syne)", fontSize: 20, fontWeight: 700, color: "var(--income)", marginBottom: 20 }}>
               Import complete
             </h2>
-            <div style={{ display: "flex", gap: 48, justifyContent: "center" }}>
+            <div style={{ display: "flex", gap: 40, justifyContent: "center", flexWrap: "wrap" }}>
               <Stat label="Imported" value={String(result.importedRows)} color="var(--income)" />
-              <Stat label="Duplicates skipped" value={String(result.skippedRows)} />
+              {result.skippedRows > 0 && <Stat label="Already existed" value={String(result.skippedRows)} color="var(--accent)" />}
               {result.errorRows > 0 && <Stat label="Errors" value={String(result.errorRows)} color="var(--expense)" />}
             </div>
-            <div style={{ marginTop: 36, display: "flex", gap: 12, justifyContent: "center" }}>
+            <div style={{ marginTop: 28, display: "flex", gap: 12, justifyContent: "center" }}>
               <button onClick={reset} style={ghostBtn}>Import another</button>
               <button onClick={() => router.push("/transactions")} style={primaryBtn(false)}>
                 View transactions →
               </button>
             </div>
           </div>
+
+          {/* Skipped rows review */}
+          {result.skippedDetails.length > 0 && (
+            <div style={{ background: "var(--bg-2)", border: "1px solid #c9a84c44", borderRadius: 10, overflow: "hidden" }}>
+              <div style={{ padding: "14px 20px", borderBottom: "1px solid #c9a84c22", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                <div>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: "var(--accent)" }}>
+                    {result.skippedDetails.length} transaction{result.skippedDetails.length !== 1 ? "s" : ""} already existed
+                  </span>
+                  <span style={{ fontSize: 12, color: "var(--text-muted)", marginLeft: 8 }}>
+                    — select any to import anyway
+                  </span>
+                </div>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <button
+                    onClick={() => setSelectedSkipped(
+                      selectedSkipped.size === result.skippedDetails.length
+                        ? new Set()
+                        : new Set(result.skippedDetails.map((_, i) => i))
+                    )}
+                    style={{ ...ghostBtn, padding: "5px 12px", fontSize: 12 }}
+                  >
+                    {selectedSkipped.size === result.skippedDetails.length ? "Deselect all" : "Select all"}
+                  </button>
+                  {selectedSkipped.size > 0 && (
+                    <button
+                      onClick={forceImportSelected}
+                      disabled={forceImporting}
+                      style={{ ...primaryBtn(forceImporting), padding: "5px 16px", fontSize: 12 }}
+                    >
+                      {forceImporting ? "Importing…" : `Import selected (${selectedSkipped.size})`}
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div style={{ maxHeight: 320, overflowY: "auto" }}>
+                {result.skippedDetails.map((row, i) => {
+                  const amt = row.amount;
+                  const isIncome = amt > 0;
+                  const checked = selectedSkipped.has(i);
+                  return (
+                    <label key={i} style={{
+                      display: "flex", alignItems: "center", gap: 14,
+                      padding: "10px 20px",
+                      borderBottom: "1px solid var(--border)",
+                      cursor: "pointer",
+                      background: checked ? "var(--accent-dim)" : "transparent",
+                      transition: "background 0.1s",
+                    }}>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => setSelectedSkipped((prev) => {
+                          const next = new Set(prev);
+                          next.has(i) ? next.delete(i) : next.add(i);
+                          return next;
+                        })}
+                        style={{ accentColor: "var(--accent)", width: 14, height: 14, flexShrink: 0 }}
+                      />
+                      <span style={{ fontSize: 12, color: "var(--text-muted)", fontFamily: "var(--font-ibm-mono)", whiteSpace: "nowrap" }}>
+                        {row.date}
+                      </span>
+                      <span style={{ flex: 1, fontSize: 13, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {row.description}
+                      </span>
+                      <span style={{ fontFamily: "var(--font-ibm-mono)", fontSize: 13, fontWeight: 500, color: isIncome ? "var(--income)" : "var(--expense)", whiteSpace: "nowrap" }}>
+                        {isIncome ? "+" : ""}{formatCurrency(amt, "MYR")}
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
