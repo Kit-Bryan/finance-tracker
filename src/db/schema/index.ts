@@ -19,7 +19,10 @@ export const accounts = pgTable("accounts", {
   id: serial("id").primaryKey(),
   name: varchar("name", { length: 255 }).notNull(),
   bank: varchar("bank", { length: 255 }).notNull(),
-  currency: varchar("currency", { length: 3 }).notNull().default("USD"),
+  accountType: varchar("account_type", { length: 50 }),   // savings | current | credit_card | ewallet
+  accountNumber: varchar("account_number", { length: 20 }), // masked for display e.g. ****1234
+  accountNumberHash: varchar("account_number_hash", { length: 64 }), // SHA-256 of full number for matching
+  currency: varchar("currency", { length: 3 }).notNull().default("MYR"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -49,6 +52,7 @@ export const importBatches = pgTable("import_batches", {
   importedRows: integer("imported_rows").default(0),
   errorRows: integer("error_rows").default(0),
   errors: jsonb("errors"),
+  deletedAt: timestamp("deleted_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -91,7 +95,7 @@ export const transactions = pgTable(
     categoryId: integer("category_id").references(() => categories.id),
     postedAt: timestamp("posted_at").notNull(),
     amount: numeric("amount", { precision: 15, scale: 2 }).notNull(),
-    currency: varchar("currency", { length: 3 }).notNull().default("USD"),
+    currency: varchar("currency", { length: 3 }).notNull().default("MYR"),
     description: text("description").notNull(),
     merchantNormalized: varchar("merchant_normalized", { length: 255 }),
     fingerprint: varchar("fingerprint", { length: 64 }).notNull(),
@@ -101,6 +105,7 @@ export const transactions = pgTable(
     transferPairId: integer("transfer_pair_id"),
     rawRow: jsonb("raw_row"),
     notes: text("notes"),
+    deletedAt: timestamp("deleted_at"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
