@@ -7,6 +7,8 @@ import ReviewQueue from "@/components/ReviewQueue";
 import AgentChat, { ContextTransaction } from "@/components/AgentChat";
 import CategoryCombobox, { CategoryValue } from "@/components/CategoryCombobox";
 import FilterCategoryCombobox from "@/components/FilterCategoryCombobox";
+import TransactionEditPanel from "@/components/TransactionEditPanel";
+import ConfirmDialog from "@/components/ConfirmDialog";
 
 interface Transaction {
   id: number;
@@ -78,9 +80,9 @@ export default function TransactionsContent() {
   });
 
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [editDraft, setEditDraft] = useState<Partial<Transaction>>({});
   const [savingId, setSavingId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<Transaction | null>(null);
   const [bulkRunning, setBulkRunning] = useState(false);
   const [bulkResult, setBulkResult] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
@@ -132,14 +134,17 @@ export default function TransactionsContent() {
       body: JSON.stringify({ notes: note }),
     });
     setEditingNoteId(null);
-    fetchAll(filters, page);
+    // Update local state — no full re-fetch, no scroll jump
+    setTransactions((prev) => prev.map((t) => t.id === txId ? { ...t, notes: note } : t));
   }
 
   async function generateNote(txId: number) {
     setGeneratingNoteId(txId);
-    await fetch(`/api/transactions/${txId}/note`, { method: "POST" });
+    const res = await fetch(`/api/transactions/${txId}/note`, { method: "POST" });
+    const data = await res.json();
     setGeneratingNoteId(null);
-    fetchAll(filters, page);
+    // Update local state only
+    setTransactions((prev) => prev.map((t) => t.id === txId ? { ...t, notes: data.note ?? t.notes } : t));
   }
 
   async function restoreTransaction(txId: number) {
@@ -163,23 +168,16 @@ export default function TransactionsContent() {
   const parentCats = categories.filter((c) => !c.parentId);
   const childrenOf = (pid: number) => categories.filter((c) => c.parentId === pid);
 
-  async function saveEdit(txId: number) {
-    setSavingId(txId);
-    await fetch(`/api/transactions/${txId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(editDraft),
-    });
-    setSavingId(null);
+  function handleEditSaved() {
     setEditingId(null);
-    setEditDraft({});
     fetchAll(filters, page);
   }
 
-  async function deleteTransaction(txId: number) {
-    if (!confirm("Delete this transaction?")) return;
-    setDeletingId(txId);
-    await fetch(`/api/transactions/${txId}`, { method: "DELETE" });
+  async function confirmDeleteTransaction() {
+    if (!confirmDelete) return;
+    setDeletingId(confirmDelete.id);
+    setConfirmDelete(null);
+    await fetch(`/api/transactions/${confirmDelete.id}`, { method: "DELETE" });
     setDeletingId(null);
     fetchAll(filters, page);
   }
@@ -331,139 +329,55 @@ export default function TransactionsContent() {
                     const isDeleting = deletingId === tx.id;
                     const displayName = tx.merchantNormalized || tx.description;
 
+                    const isExpanded = expandedDescriptions.has(tx.id);
+
                     return (
-                      <tr key={tx.id} style={{ borderBottom: "1px solid var(--border)", background: isEditing ? "var(--bg-3)" : "transparent", transition: "background 0.1s", opacity: isDeleting ? 0.4 : 1 }}
+                      <tr
+                        key={tx.id}
+                        style={{
+                          borderBottom: "1px solid var(--border)",
+                          background: isEditing ? "var(--accent-dim)" : isDeleting ? "var(--expense-dim)" : "transparent",
+                          borderLeft: isEditing ? "3px solid var(--accent)" : "3px solid transparent",
+                          transition: "background 0.15s, border-color 0.15s",
+                          opacity: isDeleting ? 0.5 : 1,
+                        }}
                         onMouseEnter={(e) => !isEditing && (e.currentTarget.style.background = "var(--bg-3)")}
                         onMouseLeave={(e) => !isEditing && (e.currentTarget.style.background = "transparent")}
                       >
                         {/* Date */}
-                        <td style={{ padding: "10px 16px", fontSize: 12, color: "var(--text-muted)", fontFamily: "var(--font-ibm-mono)", whiteSpace: "nowrap" }}>
-                          {isEditing ? (
-                            <input type="date" defaultValue={new Date(tx.postedAt).toISOString().slice(0, 10)}
-                              onChange={(e) => setEditDraft((d) => ({ ...d, postedAt: e.target.value }))}
-                              style={{ ...selectStyle, fontSize: 11, padding: "4px 6px", width: 130 }} />
-                          ) : new Date(tx.postedAt).toLocaleDateString("en-MY", { day: "numeric", month: "short", year: "numeric" })}
+                        <td style={{ padding: "10px 14px", fontSize: 12, color: "var(--text-muted)", fontFamily: "var(--font-ibm-mono)", whiteSpace: "nowrap" }}>
+                          {new Date(tx.postedAt).toLocaleDateString("en-MY", { day: "numeric", month: "short", year: "numeric" })}
                         </td>
 
                         {/* Merchant / Description */}
-                        <td
-                          style={{ padding: "10px 16px", maxWidth: 300, cursor: isEditing ? "default" : "pointer" }}
-                          onClick={() => {
-                            if (isEditing) return;
-                            setExpandedDescriptions((prev) => {
-                              const next = new Set(prev);
-                              next.has(tx.id) ? next.delete(tx.id) : next.add(tx.id);
-                              return next;
-                            });
-                          }}
+                        <td style={{ padding: "10px 16px", maxWidth: 300, cursor: "pointer" }}
+                          onClick={() => setExpandedDescriptions((prev) => { const next = new Set(prev); next.has(tx.id) ? next.delete(tx.id) : next.add(tx.id); return next; })}
                         >
-                          {isEditing ? (
-                            <input type="text" defaultValue={tx.merchantNormalized || tx.description}
-                              onChange={(e) => setEditDraft((d) => ({ ...d, description: e.target.value }))}
-                              style={{ ...selectStyle, width: "100%", fontSize: 12 }} />
-                          ) : (() => {
-                            const isExpanded = expandedDescriptions.has(tx.id);
-                            const isEditingNote = editingNoteId === tx.id;
-                            const isGenerating = generatingNoteId === tx.id;
-                            return (
-                              <div>
-                                {/* Merchant name */}
-                                <div style={{
-                                  fontSize: 13, color: "var(--text)",
-                                  overflow: isExpanded ? "visible" : "hidden",
-                                  textOverflow: isExpanded ? "unset" : "ellipsis",
-                                  whiteSpace: isExpanded ? "normal" : "nowrap",
-                                  wordBreak: isExpanded ? "break-word" : "normal",
-                                }}>
-                                  {displayName}
-                                </div>
-                                {/* Notes — always fully visible, shown before raw description */}
-                                {isEditingNote ? (
-                                  <div style={{ marginTop: 4 }} onClick={(e) => e.stopPropagation()}>
-                                    <input
-                                      autoFocus
-                                      type="text"
-                                      defaultValue={noteDraft}
-                                      onKeyDown={(e) => {
-                                        if (e.key === "Enter") saveNote(tx.id, e.currentTarget.value);
-                                        if (e.key === "Escape") setEditingNoteId(null);
-                                      }}
-                                      onBlur={(e) => {
-                                        const val = e.currentTarget.value;
-                                        // Only save if changed
-                                        if (val !== noteDraft) saveNote(tx.id, val);
-                                        else setEditingNoteId(null);
-                                      }}
-                                      placeholder="Add a note…"
-                                      style={{ ...selectStyle, width: "100%", fontSize: 11, padding: "3px 6px" }}
-                                    />
-                                  </div>
-                                ) : (
-                                  <div style={{ marginTop: 3, display: "flex", alignItems: "flex-start", gap: 4 }} onClick={(e) => e.stopPropagation()}>
-                                    {tx.notes ? (
-                                      <span
-                                        onClick={() => { setEditingNoteId(tx.id); setNoteDraft(tx.notes ?? ""); }}
-                                        style={{ fontSize: 11, color: "var(--accent)", cursor: "text", fontStyle: "italic", lineHeight: 1.4, flex: 1 }}
-                                      >
-                                        {tx.notes}
-                                      </span>
-                                    ) : (
-                                      <span
-                                        onClick={() => { setEditingNoteId(tx.id); setNoteDraft(""); }}
-                                        style={{ fontSize: 10, color: "var(--text-dim)", cursor: "text" }}
-                                      >
-                                        + note
-                                      </span>
-                                    )}
-                                    <button
-                                      onClick={() => generateNote(tx.id)}
-                                      disabled={isGenerating}
-                                      title="AI generate note"
-                                      style={{ background: "none", border: "none", cursor: "pointer", fontSize: 10, color: "var(--text-muted)", padding: "0 2px", opacity: isGenerating ? 0.5 : 1, flexShrink: 0, marginTop: 1 }}
-                                    >
-                                      {isGenerating ? "…" : "✦"}
-                                    </button>
-                                  </div>
-                                )}
-                                {/* Raw bank description — below notes, expandable */}
-                                {(tx.merchantNormalized && tx.merchantNormalized !== tx.description) && (
-                                  <div style={{
-                                    fontSize: 10, color: "var(--text-muted)", marginTop: 2,
-                                    overflow: isExpanded ? "visible" : "hidden",
-                                    textOverflow: isExpanded ? "unset" : "ellipsis",
-                                    whiteSpace: isExpanded ? "normal" : "nowrap",
-                                    wordBreak: isExpanded ? "break-word" : "normal",
-                                  }}>
-                                    {tx.description}
-                                  </div>
-                                )}
-                                {!isExpanded && (tx.merchantNormalized || tx.description).length > 35 && !isEditingNote && (
-                                  <div style={{ fontSize: 10, color: "var(--text-dim)", marginTop: 1 }}>click to expand</div>
-                                )}
+                          <div>
+                            <div style={{ fontSize: 13, color: "var(--text)", overflow: isExpanded ? "visible" : "hidden", textOverflow: isExpanded ? "unset" : "ellipsis", whiteSpace: isExpanded ? "normal" : "nowrap", wordBreak: isExpanded ? "break-word" : "normal" }}>
+                              {displayName}
+                            </div>
+                            {tx.notes && (
+                              <div style={{ marginTop: 2 }} onClick={(e) => e.stopPropagation()}>
+                                <span style={{ fontSize: 11, color: "var(--accent)", fontStyle: "italic" }}>{tx.notes}</span>
                               </div>
-                            );
-                          })()}
+                            )}
+                            {tx.merchantNormalized && tx.merchantNormalized !== tx.description && (
+                              <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 1, overflow: isExpanded ? "visible" : "hidden", textOverflow: isExpanded ? "unset" : "ellipsis", whiteSpace: isExpanded ? "normal" : "nowrap" }}>
+                                {tx.description}
+                              </div>
+                            )}
+                            {!isExpanded && (tx.merchantNormalized || tx.description).length > 35 && (
+                              <div style={{ fontSize: 10, color: "var(--text-dim)", marginTop: 1 }}>click to expand</div>
+                            )}
+                          </div>
                         </td>
 
-                        {/* Category — always directly editable, no edit mode needed */}
-                        <td style={{ padding: "6px 16px", opacity: savingId === tx.id ? 0.5 : 1 }}>
-                          <CategoryCombobox
-                            value={tx.categoryId && tx.categoryName
-                              ? { id: tx.categoryId, name: tx.categoryName, color: tx.categoryColor }
-                              : null}
-                            onChange={(cat) => {
-                              setSavingId(tx.id);
-                              fetch(`/api/transactions/${tx.id}`, {
-                                method: "PATCH",
-                                headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({ categoryId: cat.id }),
-                              }).then(() => { setSavingId(null); fetchAll(filters, page); });
-                            }}
-                            categories={categories}
-                            onCategoryCreated={(cat) => setCategories((prev) => [...prev, cat])}
-                            placeholder="— Uncategorized"
-                            disabled={savingId === tx.id}
-                          />
+                        {/* Category badge */}
+                        <td style={{ padding: "10px 16px" }}>
+                          {tx.categoryName
+                            ? <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 3, background: (tx.categoryColor ?? "#888") + "22", color: tx.categoryColor ?? "var(--text-muted)" }}>{tx.categoryName}</span>
+                            : <span style={{ fontSize: 11, color: "var(--text-dim)" }}>—</span>}
                         </td>
 
                         {/* Account */}
@@ -471,34 +385,18 @@ export default function TransactionsContent() {
 
                         {/* Amount */}
                         <td style={{ padding: "10px 16px", textAlign: "right", fontFamily: "var(--font-ibm-mono)", whiteSpace: "nowrap" }}>
-                          {isEditing ? (
-                            <input type="number" step="0.01" defaultValue={amt}
-                              onChange={(e) => setEditDraft((d) => ({ ...d, amount: e.target.value }))}
-                              style={{ ...selectStyle, width: 100, textAlign: "right", fontSize: 12 }} />
-                          ) : (
-                            <span style={{ fontSize: 13, fontWeight: 500, color: isIncome ? "var(--income)" : "var(--expense)" }}>
-                              {isIncome ? "+" : ""}{formatCurrency(amt, "MYR")}
-                            </span>
-                          )}
+                          <span style={{ fontSize: 13, fontWeight: 500, color: isIncome ? "var(--income)" : "var(--expense)" }}>
+                            {isIncome ? "+" : ""}{formatCurrency(amt, "MYR")}
+                          </span>
                         </td>
 
-                        {/* Actions */}
+                        {/* Hover actions */}
                         <td style={{ padding: "10px 12px", whiteSpace: "nowrap" }}>
-                          {isEditing ? (
-                            <div style={{ display: "flex", gap: 6 }}>
-                              <ActionBtn color="var(--income)" onClick={() => saveEdit(tx.id)} disabled={savingId === tx.id}>✓</ActionBtn>
-                              <ActionBtn color="var(--text-muted)" onClick={() => { setEditingId(null); setEditDraft({}); }}>✕</ActionBtn>
-                            </div>
-                          ) : (
-                            <div style={{ display: "flex", gap: 4, opacity: 0, transition: "opacity 0.15s" }} className="row-actions">
-                              <ActionBtn color="var(--accent)" onClick={() => {
-                                setAgentContext({ id: tx.id, description: tx.description, merchantNormalized: tx.merchantNormalized, amount: tx.amount, postedAt: tx.postedAt, categoryName: tx.categoryName, notes: tx.notes });
-                                setAgentOpen(true);
-                              }} title="Ask AI about this transaction">✦</ActionBtn>
-                              <ActionBtn color="var(--text-muted)" onClick={() => { setEditingId(tx.id); setEditDraft({}); }} title="Edit">✎</ActionBtn>
-                              <ActionBtn color="var(--expense)" onClick={() => deleteTransaction(tx.id)} title="Delete">✕</ActionBtn>
-                            </div>
-                          )}
+                          <div style={{ display: "flex", gap: 4, opacity: 0, transition: "opacity 0.15s" }} className="row-actions">
+                            <ActionBtn color="var(--accent)" title="Ask AI" onClick={() => { setAgentContext({ id: tx.id, description: tx.description, merchantNormalized: tx.merchantNormalized, amount: tx.amount, postedAt: tx.postedAt, categoryName: tx.categoryName, notes: tx.notes }); setAgentOpen(true); }}>✦</ActionBtn>
+                            <ActionBtn color="var(--text-muted)" title="Edit" onClick={() => setEditingId(isEditing ? null : tx.id)}>✎</ActionBtn>
+                            <ActionBtn color="var(--expense)" title="Delete" onClick={() => setConfirmDelete(tx)}>✕</ActionBtn>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -644,6 +542,26 @@ export default function TransactionsContent() {
           )}
         </div>
       )}
+
+      {/* ── EDIT PANEL ── */}
+      <TransactionEditPanel
+        transaction={transactions.find((t) => t.id === editingId) ?? null}
+        categories={categories}
+        onClose={() => setEditingId(null)}
+        onSaved={handleEditSaved}
+        onCategoryCreated={(cat) => setCategories((prev) => [...prev, cat])}
+      />
+
+      {/* ── DELETE CONFIRM ── */}
+      <ConfirmDialog
+        open={!!confirmDelete}
+        title="Delete transaction?"
+        description={confirmDelete ? `${confirmDelete.merchantNormalized || confirmDelete.description} · ${new Date(confirmDelete.postedAt).toLocaleDateString("en-MY", { day: "numeric", month: "short", year: "numeric" })} · ${parseFloat(confirmDelete.amount) < 0 ? "-" : "+"}MYR ${Math.abs(parseFloat(confirmDelete.amount)).toFixed(2)}` : undefined}
+        confirmLabel="Delete"
+        confirmColor="var(--expense)"
+        onConfirm={confirmDeleteTransaction}
+        onCancel={() => setConfirmDelete(null)}
+      />
 
       {/* ── AGENT CHAT ── */}
       <AgentChat
