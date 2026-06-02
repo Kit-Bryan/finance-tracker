@@ -198,6 +198,7 @@ export default function ReviewQueue({ categories, onResolved, onCategoryCreated 
                             value={hints[tx.id] ?? ""}
                             onChange={(e) => setHints((h) => ({ ...h, [tx.id]: e.target.value }))}
                             onKeyDown={(e) => e.key === "Enter" && getAISuggestion(tx, e.currentTarget.value)}
+                            onBlur={(e) => { if (e.currentTarget.value.trim()) getAISuggestion(tx, e.currentTarget.value); }}
                             placeholder="e.g. lunch, groceries, Grab ride…"
                             style={{
                               flex: 1, background: "var(--bg-3)", border: "1px solid var(--border-2)",

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 export interface Category {
   id: number;
@@ -34,14 +35,21 @@ export default function CategoryCombobox({
   const [newName, setNewName] = useState("");
   const [newParentId, setNewParentId] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
-  const [dropUp, setDropUp] = useState(false);
+  const [dropPos, setDropPos] = useState({ top: 0, left: 0, width: 0, above: false });
+  const [mounted, setMounted] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const portalRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Close on outside click
+  useEffect(() => { setMounted(true); }, []);
+
+  // Close on outside click — must exclude the portal div too
   useEffect(() => {
     function handler(e: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      const inTrigger = containerRef.current?.contains(target);
+      const inPortal = portalRef.current?.contains(target);
+      if (!inTrigger && !inPortal) {
         setOpen(false);
         setCreating(false);
         setQuery("");
@@ -151,12 +159,17 @@ export default function CategoryCombobox({
     onChange({ id: cat.id, name: cat.name, color: cat.color });
   }
 
-  // Measure available space when opening
   function openDropdown() {
     if (containerRef.current) {
       const rect = containerRef.current.getBoundingClientRect();
       const spaceBelow = window.innerHeight - rect.bottom;
-      setDropUp(spaceBelow < 320);
+      const above = spaceBelow < 320;
+      setDropPos({
+        top: above ? rect.top + window.scrollY : rect.bottom + window.scrollY,
+        left: rect.left + window.scrollX,
+        width: rect.width,
+        above,
+      });
     }
     setOpen((o) => !o);
     if (!open) setTimeout(() => inputRef.current?.focus(), 50);
@@ -169,6 +182,81 @@ export default function CategoryCombobox({
   }
 
   const displayValue = value?.name ?? "";
+
+  const dropdownContent = (
+    <div ref={portalRef} style={{
+      position: "fixed",
+      top: dropPos.above ? undefined : dropPos.top + 4,
+      bottom: dropPos.above ? window.innerHeight - dropPos.top + 4 : undefined,
+      left: dropPos.left,
+      zIndex: 9999,
+      width: Math.max(260, dropPos.width),
+      background: "var(--bg-3)",
+      border: "1px solid var(--border-2)",
+      borderRadius: 7,
+      boxShadow: dropPos.above ? "0 -8px 24px #00000055" : "0 8px 24px #00000055",
+      overflow: "hidden",
+    }}>
+      {/* Search input */}
+      <div style={{ padding: "8px 10px", borderBottom: "1px solid var(--border)" }}>
+        <input ref={inputRef} type="text" value={query}
+          onChange={(e) => { setQuery(e.target.value); setCreating(false); }}
+          placeholder="Search categories…"
+          style={{ width: "100%", background: "var(--bg-2)", border: "1px solid var(--border)", borderRadius: 4, color: "var(--text)", fontSize: 12, padding: "5px 8px", outline: "none", fontFamily: "inherit" }}
+        />
+      </div>
+      <div style={{ maxHeight: 280, overflowY: "auto" }}>
+        {aiSuggestion && !q && (
+          <div style={{ padding: "6px 10px 2px", borderBottom: "1px solid var(--border)" }}>
+            <div style={{ fontSize: 10, color: "var(--accent)", letterSpacing: "0.08em", marginBottom: 4 }}>✦ AI SUGGESTION · {Math.round(aiSuggestion.confidence * 100)}% confident</div>
+            {aiSuggestion.isNew ? (
+              <button onClick={() => { setNewName(aiSuggestion.name); setNewParentId(aiSuggestion.suggestedParent ? (categories.find(c => c.name.toLowerCase() === aiSuggestion.suggestedParent!.toLowerCase())?.id ?? null) : null); setCreating(true); }} style={suggestionBtn}>
+                <span style={{ color: "var(--accent)" }}>+ Create "{aiSuggestion.name}"</span>
+                {aiSuggestion.suggestedParent && <span style={{ fontSize: 10, color: "var(--text-muted)", marginLeft: 6 }}>under {aiSuggestion.suggestedParent}</span>}
+              </button>
+            ) : (() => { const cat = categories.find((c) => c.id === aiSuggestion.categoryId || c.name.toLowerCase() === aiSuggestion.name.toLowerCase()); return cat ? (<button onClick={() => selectCat(cat)} style={suggestionBtn}>{cat.color && <span style={{ width: 7, height: 7, borderRadius: "50%", background: cat.color }} />}<span style={{ color: cat.color ?? "var(--text)" }}>{cat.name}</span></button>) : null; })()}
+          </div>
+        )}
+        {allFiltered.length === 0 && q && <div style={{ padding: "12px 14px", color: "var(--text-muted)", fontSize: 12 }}>No matches — create it below</div>}
+        {grouped.map(({ parent, children }, gi) => (
+          <div key={gi}>
+            {parent && !q && <div style={{ padding: "6px 10px 2px", fontSize: 10, letterSpacing: "0.08em", color: "var(--text-muted)", textTransform: "uppercase" }}>{parent.name}</div>}
+            {children.map((cat) => (
+              <button key={cat.id} onClick={() => selectCat(cat)}
+                style={{ width: "100%", padding: "7px 14px", background: value?.id === cat.id ? "var(--accent-dim)" : "none", border: "none", textAlign: "left", cursor: "pointer", display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: value?.id === cat.id ? "var(--accent)" : "var(--text)", fontFamily: "inherit" }}
+                onMouseEnter={(e) => { if (value?.id !== cat.id) e.currentTarget.style.background = "var(--border)"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = value?.id === cat.id ? "var(--accent-dim)" : "none"; }}
+              >
+                {cat.color && <span style={{ width: 7, height: 7, borderRadius: "50%", background: cat.color, flexShrink: 0 }} />}
+                {cat.name}
+                {value?.id === cat.id && <span style={{ marginLeft: "auto", fontSize: 11 }}>✓</span>}
+              </button>
+            ))}
+          </div>
+        ))}
+        {q && !exactMatch && !creating && <button onClick={() => { setNewName(query); setCreating(true); setQuery(""); }} style={{ ...suggestionBtn, padding: "8px 14px", borderTop: "1px solid var(--border)", color: "var(--accent)" }}>+ Create "{query}"</button>}
+        {!q && !creating && <button onClick={() => { setNewName(""); setCreating(true); }} style={{ ...suggestionBtn, padding: "8px 14px", borderTop: "1px solid var(--border)", color: "var(--text-muted)" }}>+ New category</button>}
+      </div>
+      {creating && (
+        <div style={{ padding: "10px 12px", borderTop: "1px solid var(--border)", background: "var(--bg-2)" }}>
+          <div style={{ fontSize: 11, color: "var(--accent)", marginBottom: 8 }}>Create new category</div>
+          <input autoFocus type="text" value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && createCategory()} placeholder="Category name…" style={{ ...createInput, marginBottom: 8 }} />
+          <select value={newParentId ?? ""} onChange={(e) => setNewParentId(e.target.value ? parseInt(e.target.value) : null)} style={{ ...createInput, marginBottom: 8 }}>
+            <option value="">No parent (top-level)</option>
+            {parentCats.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button onClick={createCategory} disabled={saving || !newName.trim()} style={{ flex: 1, padding: "6px", borderRadius: 4, border: "none", background: saving || !newName.trim() ? "var(--border-2)" : "var(--accent)", color: "#000", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+              {saving ? "Saving…" : "Create"}
+            </button>
+            <button onClick={() => setCreating(false)} style={{ padding: "6px 10px", borderRadius: 4, border: "1px solid var(--border-2)", background: "transparent", color: "var(--text-muted)", fontSize: 12, cursor: "pointer" }}>Cancel</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  const dropdownPortal = open && mounted ? createPortal(dropdownContent, document.body) : null;
 
   return (
     <div ref={containerRef} style={{ position: "relative", minWidth: 180 }}>
@@ -206,171 +294,7 @@ export default function CategoryCombobox({
         <span style={{ color: "var(--text-muted)", fontSize: 10, flexShrink: 0 }}>▾</span>
       </button>
 
-      {/* Dropdown */}
-      {open && (
-        <div style={{
-          position: "absolute",
-          ...(dropUp ? { bottom: "100%", marginBottom: 4 } : { top: "100%", marginTop: 4 }),
-          left: 0,
-          zIndex: 200,
-          width: Math.max(260, containerRef.current?.offsetWidth ?? 0),
-          background: "var(--bg-3)",
-          border: "1px solid var(--border-2)",
-          borderRadius: 7,
-          boxShadow: dropUp ? "0 -8px 24px #00000055" : "0 8px 24px #00000055",
-          overflow: "hidden",
-        }}>
-          {/* Search input */}
-          <div style={{ padding: "8px 10px", borderBottom: "1px solid var(--border)" }}>
-            <input
-              ref={inputRef}
-              type="text"
-              value={query}
-              onChange={(e) => { setQuery(e.target.value); setCreating(false); }}
-              placeholder="Search categories…"
-              style={{
-                width: "100%",
-                background: "var(--bg-2)",
-                border: "1px solid var(--border)",
-                borderRadius: 4,
-                color: "var(--text)",
-                fontSize: 12,
-                padding: "5px 8px",
-                outline: "none",
-                fontFamily: "inherit",
-              }}
-            />
-          </div>
-
-          <div style={{ maxHeight: 280, overflowY: "auto" }}>
-            {/* AI suggestion — always at top if present */}
-            {aiSuggestion && !q && (
-              <div style={{ padding: "6px 10px 2px", borderBottom: "1px solid var(--border)" }}>
-                <div style={{ fontSize: 10, color: "var(--accent)", letterSpacing: "0.08em", marginBottom: 4 }}>
-                  ✦ AI SUGGESTION · {Math.round(aiSuggestion.confidence * 100)}% confident
-                </div>
-                {aiSuggestion.isNew ? (
-                  <button
-                    onClick={() => {
-                      setNewName(aiSuggestion.name);
-                      setNewParentId(aiSuggestion.suggestedParent
-                        ? (categories.find(c => c.name.toLowerCase() === aiSuggestion.suggestedParent!.toLowerCase())?.id ?? null)
-                        : null);
-                      setCreating(true);
-                    }}
-                    style={suggestionBtn}
-                  >
-                    <span style={{ color: "var(--accent)" }}>+ Create "{aiSuggestion.name}"</span>
-                    {aiSuggestion.suggestedParent && (
-                      <span style={{ fontSize: 10, color: "var(--text-muted)", marginLeft: 6 }}>under {aiSuggestion.suggestedParent}</span>
-                    )}
-                  </button>
-                ) : (
-                  (() => {
-                    const cat = categories.find((c) => c.id === aiSuggestion.categoryId || c.name.toLowerCase() === aiSuggestion.name.toLowerCase());
-                    return cat ? (
-                      <button onClick={() => selectCat(cat)} style={suggestionBtn}>
-                        {cat.color && <span style={{ width: 7, height: 7, borderRadius: "50%", background: cat.color }} />}
-                        <span style={{ color: cat.color ?? "var(--text)" }}>{cat.name}</span>
-                      </button>
-                    ) : null;
-                  })()
-                )}
-              </div>
-            )}
-
-            {/* No results */}
-            {allFiltered.length === 0 && q && (
-              <div style={{ padding: "12px 14px", color: "var(--text-muted)", fontSize: 12 }}>No matches — create it below</div>
-            )}
-
-            {/* Category list */}
-            {grouped.map(({ parent, children }, gi) => (
-              <div key={gi}>
-                {parent && !q && (
-                  <div style={{ padding: "6px 10px 2px", fontSize: 10, letterSpacing: "0.08em", color: "var(--text-muted)", textTransform: "uppercase" }}>
-                    {parent.name}
-                  </div>
-                )}
-                {children.map((cat) => (
-                  <button
-                    key={cat.id}
-                    onClick={() => selectCat(cat)}
-                    style={{
-                      width: "100%", padding: "7px 14px", background: value?.id === cat.id ? "var(--accent-dim)" : "none",
-                      border: "none", textAlign: "left", cursor: "pointer", display: "flex", alignItems: "center", gap: 8,
-                      fontSize: 13, color: value?.id === cat.id ? "var(--accent)" : "var(--text)",
-                      fontFamily: "inherit",
-                    }}
-                    onMouseEnter={(e) => { if (value?.id !== cat.id) e.currentTarget.style.background = "var(--border)"; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.background = value?.id === cat.id ? "var(--accent-dim)" : "none"; }}
-                  >
-                    {cat.color && <span style={{ width: 7, height: 7, borderRadius: "50%", background: cat.color, flexShrink: 0 }} />}
-                    {cat.name}
-                    {value?.id === cat.id && <span style={{ marginLeft: "auto", fontSize: 11 }}>✓</span>}
-                  </button>
-                ))}
-              </div>
-            ))}
-
-            {/* Create new option */}
-            {q && !exactMatch && !creating && (
-              <button
-                onClick={() => { setNewName(query); setCreating(true); setQuery(""); }}
-                style={{ ...suggestionBtn, padding: "8px 14px", borderTop: "1px solid var(--border)", color: "var(--accent)" }}
-              >
-                + Create "{query}"
-              </button>
-            )}
-
-            {/* Always show "Create new category" option */}
-            {!q && !creating && (
-              <button
-                onClick={() => { setNewName(""); setCreating(true); }}
-                style={{ ...suggestionBtn, padding: "8px 14px", borderTop: "1px solid var(--border)", color: "var(--text-muted)" }}
-              >
-                + New category
-              </button>
-            )}
-          </div>
-
-          {/* Inline create form */}
-          {creating && (
-            <div style={{ padding: "10px 12px", borderTop: "1px solid var(--border)", background: "var(--bg-2)" }}>
-              <div style={{ fontSize: 11, color: "var(--accent)", marginBottom: 8 }}>Create new category</div>
-              <input
-                autoFocus
-                type="text"
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && createCategory()}
-                placeholder="Category name…"
-                style={{ ...createInput, marginBottom: 8 }}
-              />
-              <select
-                value={newParentId ?? ""}
-                onChange={(e) => setNewParentId(e.target.value ? parseInt(e.target.value) : null)}
-                style={{ ...createInput, marginBottom: 8 }}
-              >
-                <option value="">No parent (top-level)</option>
-                {parentCats.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select>
-              <div style={{ display: "flex", gap: 6 }}>
-                <button
-                  onClick={createCategory}
-                  disabled={saving || !newName.trim()}
-                  style={{ flex: 1, padding: "6px", borderRadius: 4, border: "none", background: saving || !newName.trim() ? "var(--border-2)" : "var(--accent)", color: "#000", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
-                >
-                  {saving ? "Saving…" : "Create"}
-                </button>
-                <button onClick={() => setCreating(false)} style={{ padding: "6px 10px", borderRadius: 4, border: "1px solid var(--border-2)", background: "transparent", color: "var(--text-muted)", fontSize: 12, cursor: "pointer" }}>
-                  Cancel
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
+      {dropdownPortal}
     </div>
   );
 }

@@ -22,11 +22,21 @@ export interface AgentResponse {
 }
 
 export interface PendingAction {
-  type: "bulk_update_category";
-  transactionIds: number[];
-  categoryName: string;
-  categoryId: number;
-  preview: { id: number; description: string; amount: string }[];
+  type: "bulk_update_category" | "edit_transaction" | "split_transaction";
+  // bulk_update_category
+  transactionIds?: number[];
+  categoryName?: string;
+  categoryId?: number;
+  preview?: { id: number; description: string; amount: string }[];
+  // edit_transaction
+  transactionId?: number;
+  changes?: { field: string; oldValue: unknown; newValue: unknown }[];
+  description?: string;
+  // split_transaction
+  originalAmount?: number;
+  originalDescription?: string;
+  originalDate?: string;
+  splits?: { amount: number; description: string; notes?: string; categoryName?: string | null; categoryId?: number | null }[];
 }
 
 // ── Tool definitions ──────────────────────────────────────────────────────────
@@ -93,6 +103,53 @@ const TOOLS = [
       name: "get_categories",
       description: "List all available categories.",
       parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "edit_transaction",
+      description: "Edit fields of a specific transaction. Always show the user what will change before applying — this tool returns a pending confirmation.",
+      parameters: {
+        type: "object",
+        properties: {
+          transactionId: { type: "number", description: "The transaction ID to edit" },
+          date: { type: "string", description: "New date in YYYY-MM-DD format" },
+          description: { type: "string", description: "New merchant/description name" },
+          notes: { type: "string", description: "New notes text" },
+          amount: { type: "number", description: "New amount (negative=expense, positive=income)" },
+          categoryName: { type: "string", description: "New category name" },
+        },
+        required: ["transactionId"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "split_transaction",
+      description: "Split one transaction into multiple. The original is soft-deleted and replaced by the splits. Always clarify amounts first, then show a preview for confirmation.",
+      parameters: {
+        type: "object",
+        properties: {
+          transactionId: { type: "number", description: "The transaction ID to split" },
+          splits: {
+            type: "array",
+            description: "The resulting transactions after the split. Amounts must sum to the original.",
+            items: {
+              type: "object",
+              properties: {
+                amount: { type: "number" },
+                description: { type: "string" },
+                notes: { type: "string" },
+                categoryName: { type: "string" },
+              },
+              required: ["amount", "description"],
+            },
+          },
+        },
+        required: ["transactionId", "splits"],
+      },
     },
   },
   {
@@ -279,6 +336,73 @@ async function execGetCategories() {
   return cats;
 }
 
+async function execEditTransaction(args: {
+  transactionId: number; date?: string; description?: string;
+  notes?: string; amount?: number; categoryName?: string;
+}) {
+  const [tx] = await db.select().from(transactions).where(eq(transactions.id, args.transactionId));
+  if (!tx) return { error: `Transaction ${args.transactionId} not found.` };
+
+  const allCats = await db.select().from(categories);
+  const cat = args.categoryName
+    ? allCats.find((c) => c.name.toLowerCase() === args.categoryName!.toLowerCase())
+    : null;
+
+  const changes: { field: string; oldValue: unknown; newValue: unknown }[] = [];
+  if (args.date) changes.push({ field: "date", oldValue: new Date(tx.postedAt).toISOString().slice(0, 10), newValue: args.date });
+  if (args.description) changes.push({ field: "description", oldValue: tx.merchantNormalized || tx.description, newValue: args.description });
+  if (args.notes !== undefined) changes.push({ field: "notes", oldValue: tx.notes, newValue: args.notes });
+  if (args.amount !== undefined) changes.push({ field: "amount", oldValue: parseFloat(tx.amount as string), newValue: args.amount });
+  if (cat) changes.push({ field: "category", oldValue: allCats.find((c) => c.id === tx.categoryId)?.name ?? null, newValue: cat.name });
+
+  if (changes.length === 0) return { error: "No valid changes specified." };
+
+  return {
+    __pending_confirmation: true,
+    type: "edit_transaction",
+    transactionId: args.transactionId,
+    changes,
+    categoryId: cat?.id ?? null,
+    description: `${tx.merchantNormalized || tx.description} — ${new Date(tx.postedAt).toLocaleDateString("en-MY", { day: "numeric", month: "short" })}`,
+  };
+}
+
+async function execSplitTransaction(args: {
+  transactionId: number;
+  splits: { amount: number; description: string; notes?: string; categoryName?: string }[];
+}) {
+  const [tx] = await db.select().from(transactions).where(eq(transactions.id, args.transactionId));
+  if (!tx) return { error: `Transaction ${args.transactionId} not found.` };
+
+  const allCats = await db.select().from(categories);
+  const originalAmount = parseFloat(tx.amount as string);
+  const splitTotal = args.splits.reduce((s, r) => s + r.amount, 0);
+
+  // Validate total (allow small rounding error)
+  if (Math.abs(Math.abs(splitTotal) - Math.abs(originalAmount)) > 0.02) {
+    return {
+      error: `Split amounts (${splitTotal.toFixed(2)}) don't match original (${originalAmount.toFixed(2)}). Please adjust.`,
+    };
+  }
+
+  const enrichedSplits = args.splits.map((s) => {
+    const cat = s.categoryName
+      ? allCats.find((c) => c.name.toLowerCase() === s.categoryName!.toLowerCase())
+      : allCats.find((c) => c.id === tx.categoryId);
+    return { ...s, categoryId: cat?.id ?? null, categoryName: cat?.name ?? s.categoryName ?? null };
+  });
+
+  return {
+    __pending_confirmation: true,
+    type: "split_transaction",
+    transactionId: args.transactionId,
+    originalAmount,
+    originalDescription: tx.merchantNormalized || tx.description,
+    originalDate: new Date(tx.postedAt).toISOString().slice(0, 10),
+    splits: enrichedSplits,
+  };
+}
+
 async function execUpdateCategory(args: { name: string; newName?: string; color?: string }) {
   const allCats = await db.select().from(categories);
   const cat = allCats.find((c) => c.name.toLowerCase() === args.name.toLowerCase());
@@ -352,16 +476,40 @@ async function execCreateCategory(args: { name: string; parentName?: string }) {
 
 // ── Main agent loop ───────────────────────────────────────────────────────────
 
+export interface ContextTransaction {
+  id: number;
+  description: string;
+  merchantNormalized: string | null;
+  amount: string;
+  postedAt: string;
+  categoryName: string | null;
+  notes: string | null;
+}
+
 export async function runAgentTurn(
   history: AgentMessage[],
-  userMessage: string
+  userMessage: string,
+  contextTransaction?: ContextTransaction | null
 ): Promise<AgentResponse> {
   const ai = getAIClient();
   const allCategories = await db.select().from(categories);
   const allAccounts = await db.select().from(accounts);
 
-  const systemPrompt = `You are a personal finance assistant for a Malaysian user. You help manage, categorize, and understand bank transactions.
+  const txContext = contextTransaction
+    ? `\nFOCUSED TRANSACTION (the user is asking about this specific transaction):
+  ID: ${contextTransaction.id}
+  Merchant: ${contextTransaction.merchantNormalized || contextTransaction.description}
+  Raw description: ${contextTransaction.description}
+  Amount: MYR ${parseFloat(contextTransaction.amount as string).toFixed(2)}
+  Date: ${new Date(contextTransaction.postedAt).toLocaleDateString("en-MY", { day: "numeric", month: "short", year: "numeric" })}
+  Category: ${contextTransaction.categoryName ?? "Uncategorized"}
+  Notes: ${contextTransaction.notes ?? "none"}
 
+  When the user refers to "this transaction" or "it", they mean transaction ID ${contextTransaction.id}. Use edit_transaction or split_transaction tools directly with this ID.\n`
+    : "";
+
+  const systemPrompt = `You are a personal finance assistant for a Malaysian user. You help manage, categorize, and understand bank transactions.
+${txContext}
 Available categories: ${allCategories.map((c) => c.name).join(", ")}
 Accounts: ${allAccounts.map((a) => `${a.name} (${a.bank})`).join(", ")}
 Currency: MYR
@@ -371,6 +519,8 @@ Guidelines:
 - For bulk_update_category, the result requires user confirmation — tell the user what you're proposing and that it will be applied after they confirm.
 - You CAN create new categories using create_category — top-level or under a parent. Do this proactively when a user asks for a category that doesn't exist.
 - You CAN update existing categories (rename or recolor) using update_category. Before picking a color, ALWAYS call get_categories first to see what colors are already in use, then choose a hex color that is visually distinct from all existing ones.
+- You CAN edit a transaction's date, description, notes, amount, or category using edit_transaction. This returns a confirmation — never apply without user seeing the preview.
+- You CAN split a transaction into multiple using split_transaction. Amounts must sum to the original. If the user gives fractions, calculate exact amounts first and confirm. The original is soft-deleted and the splits are created as new transactions. Ask clarifying questions if the split intent is ambiguous.
 - Be concise. Use bullet points for lists of transactions.
 - If a transaction is ambiguous, ask clarifying questions rather than guessing.
 - When explaining a transaction, consider the Malaysian context (GrabPay, Touch n Go, Maybank, etc.)
@@ -421,6 +571,8 @@ Guidelines:
       else if (name === "explain_transaction") result = await execExplainTransaction(args);
       else if (name === "get_review_queue") result = await execGetReviewQueue();
       else if (name === "get_categories") result = await execGetCategories();
+      else if (name === "edit_transaction") result = await execEditTransaction(args);
+      else if (name === "split_transaction") result = await execSplitTransaction(args);
       else if (name === "update_category") result = await execUpdateCategory(args);
       else if (name === "create_category") result = await execCreateCategory(args);
       else result = { error: "Unknown tool" };
@@ -459,27 +611,77 @@ Guidelines:
 
 // ── Confirm pending action ────────────────────────────────────────────────────
 
-export async function confirmPendingAction(action: PendingAction): Promise<{ updated: number }> {
-  if (action.type !== "bulk_update_category") return { updated: 0 };
-
-  let updated = 0;
-  for (const id of action.transactionIds) {
-    const [tx] = await db.select().from(transactions).where(eq(transactions.id, id));
-    if (!tx) continue;
-
-    await db
-      .update(transactions)
-      .set({
-        categoryId: action.categoryId,
-        categorySource: "user",
-        categoryConfidence: "1",
-        updatedAt: new Date(),
-      })
-      .where(eq(transactions.id, id));
-
-    await learnMerchant(tx.description, action.categoryId, "user");
-    updated++;
+export async function confirmPendingAction(action: PendingAction): Promise<{ updated: number; message?: string }> {
+  // ── bulk_update_category ──────────────────────────────────────────────────
+  if (action.type === "bulk_update_category") {
+    let updated = 0;
+    for (const id of action.transactionIds!) {
+      const [tx] = await db.select().from(transactions).where(eq(transactions.id, id));
+      if (!tx) continue;
+      await db.update(transactions).set({ categoryId: action.categoryId!, categorySource: "user", categoryConfidence: "1", updatedAt: new Date() }).where(eq(transactions.id, id));
+      await learnMerchant(tx.description, action.categoryId!, "user");
+      updated++;
+    }
+    return { updated };
   }
 
-  return { updated };
+  // ── edit_transaction ──────────────────────────────────────────────────────
+  if (action.type === "edit_transaction") {
+    const txId = action.transactionId!;
+    const updates: Record<string, unknown> = { updatedAt: new Date() };
+    for (const change of action.changes ?? []) {
+      if (change.field === "date") updates.postedAt = new Date(change.newValue as string);
+      if (change.field === "description") { updates.merchantNormalized = change.newValue; }
+      if (change.field === "notes") updates.notes = change.newValue;
+      if (change.field === "amount") updates.amount = String(change.newValue);
+      if (change.field === "category") { updates.categoryId = action.changes?.find(c => c.field === "category") ? action.categoryId : undefined; updates.categorySource = "user"; }
+    }
+    // find categoryId from changes if category was updated
+    const catChange = action.changes?.find(c => c.field === "category");
+    if (catChange) {
+      const allCats = await db.select().from(categories);
+      const cat = allCats.find(c => c.name === catChange.newValue);
+      if (cat) { updates.categoryId = cat.id; updates.categorySource = "user"; updates.categoryConfidence = "1"; }
+    }
+    await db.update(transactions).set(updates as any).where(eq(transactions.id, txId));
+    return { updated: 1 };
+  }
+
+  // ── split_transaction ─────────────────────────────────────────────────────
+  if (action.type === "split_transaction") {
+    const [original] = await db.select().from(transactions).where(eq(transactions.id, action.transactionId!));
+    if (!original) return { updated: 0 };
+
+    // Soft-delete the original
+    await db.update(transactions).set({ deletedAt: new Date(), updatedAt: new Date() }).where(eq(transactions.id, action.transactionId!));
+
+    // Insert the splits
+    const crypto = await import("crypto");
+    let inserted = 0;
+    for (const split of action.splits ?? []) {
+      const fingerprint = crypto.createHash("sha256")
+        .update(`split:${original.fingerprint}:${split.amount}:${split.description}:${Date.now()}:${inserted}`)
+        .digest("hex").slice(0, 64);
+
+      await db.insert(transactions).values({
+        accountId: original.accountId,
+        batchId: original.batchId,
+        categoryId: split.categoryId ?? original.categoryId,
+        postedAt: original.postedAt,
+        amount: String(split.amount),
+        currency: original.currency,
+        description: split.description,
+        merchantNormalized: split.description,
+        notes: split.notes ?? null,
+        fingerprint,
+        categorySource: split.categoryId ? "user" : original.categorySource,
+        categoryConfidence: "1",
+      });
+      inserted++;
+    }
+
+    return { updated: inserted, message: `Split into ${inserted} transactions` };
+  }
+
+  return { updated: 0 };
 }

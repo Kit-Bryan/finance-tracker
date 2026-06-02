@@ -4,8 +4,9 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import { formatCurrency, startOfMonth, today } from "@/lib/format";
 import ReviewQueue from "@/components/ReviewQueue";
-import AgentChat from "@/components/AgentChat";
+import AgentChat, { ContextTransaction } from "@/components/AgentChat";
 import CategoryCombobox, { CategoryValue } from "@/components/CategoryCombobox";
+import FilterCategoryCombobox from "@/components/FilterCategoryCombobox";
 
 interface Transaction {
   id: number;
@@ -85,10 +86,14 @@ export default function TransactionsContent() {
   const [showAdd, setShowAdd] = useState(false);
   const [deletingBatch, setDeletingBatch] = useState<number | null>(null);
   const [agentOpen, setAgentOpen] = useState(false);
+  const [agentContext, setAgentContext] = useState<ContextTransaction | null>(null);
   const [trashItems, setTrashItems] = useState<TrashItem[]>([]);
   const [trashLoading, setTrashLoading] = useState(false);
   const [restoringId, setRestoringId] = useState<number | null>(null);
   const [expandedDescriptions, setExpandedDescriptions] = useState<Set<number>>(new Set());
+  const [editingNoteId, setEditingNoteId] = useState<number | null>(null);
+  const [noteDraft, setNoteDraft] = useState("");
+  const [generatingNoteId, setGeneratingNoteId] = useState<number | null>(null);
 
   const LIMIT = 50;
 
@@ -119,6 +124,23 @@ export default function TransactionsContent() {
     setTrashItems(data);
     setTrashLoading(false);
   };
+
+  async function saveNote(txId: number, note: string) {
+    await fetch(`/api/transactions/${txId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ notes: note }),
+    });
+    setEditingNoteId(null);
+    fetchAll(filters, page);
+  }
+
+  async function generateNote(txId: number) {
+    setGeneratingNoteId(txId);
+    await fetch(`/api/transactions/${txId}/note`, { method: "POST" });
+    setGeneratingNoteId(null);
+    fetchAll(filters, page);
+  }
 
   async function restoreTransaction(txId: number) {
     setRestoringId(txId);
@@ -267,17 +289,13 @@ export default function TransactionsContent() {
                 {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
               </select>
             </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4, position: "relative", zIndex: 30 }}>
               <label style={labelStyle}>Category</label>
-              <select value={filters.categoryId} onChange={(e) => { setFilters((f) => ({ ...f, categoryId: e.target.value })); setPage(1); }} style={selectStyle}>
-                <option value="">All categories</option>
-                <option value="none">Uncategorized</option>
-                {parentCats.map((p) => (
-                  <optgroup key={p.id} label={p.name}>
-                    {childrenOf(p.id).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </optgroup>
-                ))}
-              </select>
+              <FilterCategoryCombobox
+                value={filters.categoryId}
+                onChange={(v) => { setFilters((f) => ({ ...f, categoryId: v })); setPage(1); }}
+                categories={categories}
+              />
             </div>
             <div style={{ flex: 1, minWidth: 160, display: "flex", flexDirection: "column", gap: 4 }}>
               <label style={labelStyle}>Search</label>
@@ -291,7 +309,7 @@ export default function TransactionsContent() {
           </div>
 
           {/* Table */}
-          <div className="fade-up fade-up-3" style={{ background: "var(--bg-2)", border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden" }}>
+          <div className="fade-up fade-up-3" style={{ background: "var(--bg-2)", border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden", position: "relative", zIndex: 0 }}>
             {loading ? (
               <div style={{ padding: 24 }}>{[...Array(6)].map((_, i) => <div key={i} className="skeleton" style={{ height: 44, marginBottom: 8 }} />)}</div>
             ) : transactions.length === 0 ? (
@@ -345,8 +363,11 @@ export default function TransactionsContent() {
                               style={{ ...selectStyle, width: "100%", fontSize: 12 }} />
                           ) : (() => {
                             const isExpanded = expandedDescriptions.has(tx.id);
+                            const isEditingNote = editingNoteId === tx.id;
+                            const isGenerating = generatingNoteId === tx.id;
                             return (
                               <div>
+                                {/* Merchant name */}
                                 <div style={{
                                   fontSize: 13, color: "var(--text)",
                                   overflow: isExpanded ? "visible" : "hidden",
@@ -356,6 +377,55 @@ export default function TransactionsContent() {
                                 }}>
                                   {displayName}
                                 </div>
+                                {/* Notes — always fully visible, shown before raw description */}
+                                {isEditingNote ? (
+                                  <div style={{ marginTop: 4 }} onClick={(e) => e.stopPropagation()}>
+                                    <input
+                                      autoFocus
+                                      type="text"
+                                      defaultValue={noteDraft}
+                                      onKeyDown={(e) => {
+                                        if (e.key === "Enter") saveNote(tx.id, e.currentTarget.value);
+                                        if (e.key === "Escape") setEditingNoteId(null);
+                                      }}
+                                      onBlur={(e) => {
+                                        const val = e.currentTarget.value;
+                                        // Only save if changed
+                                        if (val !== noteDraft) saveNote(tx.id, val);
+                                        else setEditingNoteId(null);
+                                      }}
+                                      placeholder="Add a note…"
+                                      style={{ ...selectStyle, width: "100%", fontSize: 11, padding: "3px 6px" }}
+                                    />
+                                  </div>
+                                ) : (
+                                  <div style={{ marginTop: 3, display: "flex", alignItems: "flex-start", gap: 4 }} onClick={(e) => e.stopPropagation()}>
+                                    {tx.notes ? (
+                                      <span
+                                        onClick={() => { setEditingNoteId(tx.id); setNoteDraft(tx.notes ?? ""); }}
+                                        style={{ fontSize: 11, color: "var(--accent)", cursor: "text", fontStyle: "italic", lineHeight: 1.4, flex: 1 }}
+                                      >
+                                        {tx.notes}
+                                      </span>
+                                    ) : (
+                                      <span
+                                        onClick={() => { setEditingNoteId(tx.id); setNoteDraft(""); }}
+                                        style={{ fontSize: 10, color: "var(--text-dim)", cursor: "text" }}
+                                      >
+                                        + note
+                                      </span>
+                                    )}
+                                    <button
+                                      onClick={() => generateNote(tx.id)}
+                                      disabled={isGenerating}
+                                      title="AI generate note"
+                                      style={{ background: "none", border: "none", cursor: "pointer", fontSize: 10, color: "var(--text-muted)", padding: "0 2px", opacity: isGenerating ? 0.5 : 1, flexShrink: 0, marginTop: 1 }}
+                                    >
+                                      {isGenerating ? "…" : "✦"}
+                                    </button>
+                                  </div>
+                                )}
+                                {/* Raw bank description — below notes, expandable */}
                                 {(tx.merchantNormalized && tx.merchantNormalized !== tx.description) && (
                                   <div style={{
                                     fontSize: 10, color: "var(--text-muted)", marginTop: 2,
@@ -367,7 +437,7 @@ export default function TransactionsContent() {
                                     {tx.description}
                                   </div>
                                 )}
-                                {!isExpanded && (tx.merchantNormalized || tx.description).length > 35 && (
+                                {!isExpanded && (tx.merchantNormalized || tx.description).length > 35 && !isEditingNote && (
                                   <div style={{ fontSize: 10, color: "var(--text-dim)", marginTop: 1 }}>click to expand</div>
                                 )}
                               </div>
@@ -421,6 +491,10 @@ export default function TransactionsContent() {
                             </div>
                           ) : (
                             <div style={{ display: "flex", gap: 4, opacity: 0, transition: "opacity 0.15s" }} className="row-actions">
+                              <ActionBtn color="var(--accent)" onClick={() => {
+                                setAgentContext({ id: tx.id, description: tx.description, merchantNormalized: tx.merchantNormalized, amount: tx.amount, postedAt: tx.postedAt, categoryName: tx.categoryName, notes: tx.notes });
+                                setAgentOpen(true);
+                              }} title="Ask AI about this transaction">✦</ActionBtn>
                               <ActionBtn color="var(--text-muted)" onClick={() => { setEditingId(tx.id); setEditDraft({}); }} title="Edit">✎</ActionBtn>
                               <ActionBtn color="var(--expense)" onClick={() => deleteTransaction(tx.id)} title="Delete">✕</ActionBtn>
                             </div>
@@ -574,8 +648,9 @@ export default function TransactionsContent() {
       {/* ── AGENT CHAT ── */}
       <AgentChat
         open={agentOpen}
-        onClose={() => setAgentOpen(false)}
+        onClose={() => { setAgentOpen(false); setAgentContext(null); }}
         onTransactionsChanged={() => fetchAll(filters, page)}
+        contextTransaction={agentContext}
       />
 
       {/* ── ADD TRANSACTION MODAL ── */}
