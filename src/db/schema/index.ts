@@ -11,7 +11,7 @@ import {
   uniqueIndex,
   index,
 } from "drizzle-orm/pg-core";
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 
 // ─── Accounts ────────────────────────────────────────────────────────────────
 
@@ -110,7 +110,8 @@ export const transactions = pgTable(
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
   (t) => ({
-    fingerprintIdx: uniqueIndex("transactions_fingerprint_idx").on(t.fingerprint),
+    // Partial unique index — soft-deleted rows release their fingerprint so re-import works
+    fingerprintIdx: uniqueIndex("transactions_fingerprint_idx").on(t.fingerprint).where(sql`deleted_at IS NULL`),
     postedAtIdx: index("transactions_posted_at_idx").on(t.postedAt),
     accountIdx: index("transactions_account_idx").on(t.accountId),
   })
@@ -149,6 +150,26 @@ export const merchants = pgTable(
     normalizedIdx: uniqueIndex("merchants_normalized_idx").on(t.normalizedName),
   })
 );
+
+// ─── Chat sessions ───────────────────────────────────────────────────────────
+
+export const chatSessions = pgTable("chat_sessions", {
+  id: serial("id").primaryKey(),
+  title: varchar("title", { length: 255 }),
+  transactionId: integer("transaction_id").references(() => transactions.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const chatMessages = pgTable("chat_messages", {
+  id: serial("id").primaryKey(),
+  sessionId: integer("session_id").notNull().references(() => chatSessions.id),
+  role: varchar("role", { length: 20 }).notNull(), // user | assistant
+  content: text("content").notNull(),
+  toolResults: jsonb("tool_results"),
+  pendingAction: jsonb("pending_action"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
 
 // ─── Agent suggestions audit ─────────────────────────────────────────────────
 
