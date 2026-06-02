@@ -1,0 +1,415 @@
+"use client";
+
+import { useCallback, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { formatCurrency } from "@/lib/format";
+
+type Step = "upload" | "preview" | "done";
+
+interface PreviewRow {
+  date: string;
+  description: string;
+  amount: number;
+  currency: string;
+  fingerprint: string;
+  parseError?: string;
+}
+
+interface AccountInfo {
+  bank: string;
+  accountType: string;
+  accountNumber: string;
+  accountName: string;
+}
+
+interface PreviewResponse {
+  type: "csv" | "pdf";
+  rows: PreviewRow[];
+  suggestedProfile?: Record<string, unknown>;
+  profileId?: number;
+  account: AccountInfo;
+  accountId: number;
+  accountIsNew: boolean;
+  totalRows: number;
+  errorRows: number;
+}
+
+const ACCEPT = ".csv,.pdf,text/csv,application/pdf";
+
+export default function ImportPage() {
+  const router = useRouter();
+  const [step, setStep] = useState<Step>("upload");
+  const [file, setFile] = useState<File | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const [parsing, setParsing] = useState(false);
+  const [parseError, setParseError] = useState("");
+  const [preview, setPreview] = useState<PreviewResponse | null>(null);
+  const [saveProfile, setSaveProfile] = useState(true);
+  const [profileName, setProfileName] = useState("");
+
+  const [confirming, setConfirming] = useState(false);
+  const [result, setResult] = useState<{ importedRows: number; skippedRows: number; errorRows: number } | null>(null);
+
+  const onDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setDragging(false);
+    const f = e.dataTransfer.files[0];
+    if (f) setFile(f);
+  }, []);
+
+  async function handleParse() {
+    if (!file) return;
+    setParsing(true);
+    setParseError("");
+
+    const fd = new FormData();
+    fd.append("file", file);
+
+    try {
+      const res = await fetch("/api/parse-preview", { method: "POST", body: fd });
+      const data = await res.json();
+      if (!res.ok) { setParseError(data.error ?? "Parse failed"); setParsing(false); return; }
+      setPreview(data);
+      setProfileName(data.account?.accountName ?? data.account?.bank ?? "New Profile");
+      setStep("preview");
+    } catch (e) {
+      setParseError(String(e));
+    }
+    setParsing(false);
+  }
+
+  async function handleConfirm() {
+    if (!preview || !file) return;
+    setConfirming(true);
+
+    const body: Record<string, unknown> = {
+      accountId: preview.accountId,
+      filename: file.name,
+      rows: preview.rows.filter((r) => !r.parseError),
+    };
+
+    if (preview.profileId) {
+      body.profileId = preview.profileId;
+    } else if (preview.suggestedProfile && saveProfile) {
+      body.saveProfile = {
+        name: profileName,
+        bank: preview.account.bank,
+        config: preview.suggestedProfile,
+      };
+    }
+
+    try {
+      const res = await fetch("/api/import-confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) { setParseError(data.error ?? "Import failed"); setConfirming(false); return; }
+      setResult(data);
+      setStep("done");
+    } catch (e) {
+      setParseError(String(e));
+    }
+    setConfirming(false);
+  }
+
+  function reset() {
+    setStep("upload");
+    setFile(null);
+    setPreview(null);
+    setResult(null);
+    setParseError("");
+    setSaveProfile(true);
+  }
+
+  const validRows = preview?.rows.filter((r) => !r.parseError) ?? [];
+  const errorRows = preview?.rows.filter((r) => r.parseError) ?? [];
+  const totalExpense = validRows.filter((r) => r.amount < 0).reduce((s, r) => s + r.amount, 0);
+  const totalIncome = validRows.filter((r) => r.amount > 0).reduce((s, r) => s + r.amount, 0);
+
+  return (
+    <div style={{ padding: "32px 36px", maxWidth: 860, margin: "0 auto" }}>
+      {/* Header */}
+      <div className="fade-up fade-up-1" style={{ marginBottom: 32 }}>
+        <h1 style={{ fontFamily: "var(--font-syne)", fontSize: 26, fontWeight: 700, letterSpacing: "-0.03em", color: "var(--text)" }}>
+          Import Transactions
+        </h1>
+        <p style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 4 }}>
+          Upload a bank CSV or PDF — AI detects the bank, parses the transactions, and categorizes automatically.
+        </p>
+      </div>
+
+      {/* Stepper */}
+      <div className="fade-up fade-up-2" style={{ display: "flex", marginBottom: 32 }}>
+        {(["upload", "preview", "done"] as Step[]).map((s, i) => {
+          const active = step === s;
+          const past = ["upload", "preview", "done"].indexOf(step) > i;
+          return (
+            <div key={s} style={{ display: "flex", alignItems: "center", flex: i < 2 ? 1 : "unset" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div style={{
+                  width: 24, height: 24, borderRadius: "50%",
+                  border: `1px solid ${active ? "var(--accent)" : past ? "var(--income)" : "var(--border-2)"}`,
+                  background: active ? "var(--accent-dim)" : past ? "var(--income-dim)" : "transparent",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: 11, fontFamily: "var(--font-ibm-mono)",
+                  color: active ? "var(--accent)" : past ? "var(--income)" : "var(--text-muted)",
+                }}>
+                  {past ? "✓" : i + 1}
+                </div>
+                <span style={{ fontSize: 12, color: active ? "var(--text)" : "var(--text-muted)", textTransform: "capitalize" }}>{s}</span>
+              </div>
+              {i < 2 && <div style={{ flex: 1, height: 1, background: "var(--border)", margin: "0 12px" }} />}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* ── STEP: UPLOAD ─────────────────────────────────────── */}
+      {step === "upload" && (
+        <div className="fade-up fade-up-3">
+          <div
+            onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={onDrop}
+            onClick={() => fileRef.current?.click()}
+            style={{
+              border: `2px dashed ${dragging ? "var(--accent)" : file ? "var(--income)" : "var(--border-2)"}`,
+              borderRadius: 10,
+              padding: "56px 32px",
+              textAlign: "center",
+              cursor: "pointer",
+              background: dragging ? "var(--accent-dim)" : file ? "var(--income-dim)" : "var(--bg-2)",
+              transition: "all 0.2s",
+              marginBottom: 24,
+            }}
+          >
+            <input ref={fileRef} type="file" accept={ACCEPT} style={{ display: "none" }}
+              onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+            {file ? (
+              <>
+                <div style={{ fontSize: 32, marginBottom: 10 }}>
+                  {file.name.endsWith(".pdf") ? "📑" : "📊"}
+                </div>
+                <div style={{ fontSize: 14, color: "var(--income)", fontWeight: 600 }}>{file.name}</div>
+                <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>
+                  {(file.size / 1024).toFixed(1)} KB · click to change
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ fontSize: 36, marginBottom: 12, opacity: 0.3 }}>⬆</div>
+                <div style={{ fontSize: 14, color: "var(--text)", marginBottom: 6 }}>
+                  Drop your bank statement here
+                </div>
+                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                  CSV or PDF · Maybank, CIMB, Touch 'n Go, RHB, Public Bank…
+                </div>
+              </>
+            )}
+          </div>
+
+          {parseError && (
+            <div style={{ padding: "12px 16px", background: "var(--expense-dim)", border: "1px solid #f8717133", borderRadius: 6, color: "var(--expense)", fontSize: 13, marginBottom: 16 }}>
+              {parseError}
+            </div>
+          )}
+
+          <button onClick={handleParse} disabled={!file || parsing} style={primaryBtn(!file || parsing)}>
+            {parsing ? "Detecting & parsing…" : "Parse File →"}
+          </button>
+        </div>
+      )}
+
+      {/* ── STEP: PREVIEW ────────────────────────────────────── */}
+      {step === "preview" && preview && (
+        <div className="fade-up fade-up-2">
+          {/* Detected bank pill */}
+          <div style={{
+            background: "var(--bg-2)", border: "1px solid var(--border)", borderRadius: 8,
+            padding: "16px 20px", marginBottom: 14,
+            display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap",
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <div style={{
+                width: 36, height: 36, borderRadius: 8,
+                background: "var(--accent-dim)", border: "1px solid #c9a84c33",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 18,
+              }}>
+                🏦
+              </div>
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text)" }}>
+                  {preview.account.accountName}
+                </div>
+                <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                  {preview.account.bank}
+                  {preview.account.accountType !== "unknown" ? ` · ${preview.account.accountType.replace("_", " ")}` : ""}
+                  {preview.account.accountNumber ? ` · ****${preview.account.accountNumber.replace(/\D/g, "").slice(-4)}` : ""}
+                  {" · "}{preview.accountIsNew ? "new account created" : "matched existing account"}
+                </div>
+              </div>
+            </div>
+
+            <div style={{ marginLeft: "auto", display: "flex", gap: 24 }}>
+              <Stat label="Rows" value={String(validRows.length)} />
+              <Stat label="Income" value={formatCurrency(totalIncome, "MYR")} color="var(--income)" />
+              <Stat label="Expenses" value={formatCurrency(Math.abs(totalExpense), "MYR")} color="var(--expense)" />
+              {errorRows.length > 0 && <Stat label="Errors" value={String(errorRows.length)} color="var(--expense)" />}
+            </div>
+
+            <span style={{
+              fontSize: 11, padding: "3px 10px", borderRadius: 3,
+              background: preview.type === "pdf" ? "#6366f122" : "#14b8a622",
+              color: preview.type === "pdf" ? "#818cf8" : "#2dd4bf",
+            }}>
+              {preview.type.toUpperCase()}
+            </span>
+          </div>
+
+          {/* Save profile prompt (CSV, new layout) */}
+          {preview.type === "csv" && preview.suggestedProfile && !preview.profileId && (
+            <div style={{
+              background: "var(--accent-dim)", border: "1px solid #c9a84c33",
+              borderRadius: 8, padding: "14px 20px", marginBottom: 14,
+              display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap",
+            }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 12, color: "var(--accent)", fontWeight: 600, marginBottom: 2 }}>
+                  New CSV layout detected
+                </div>
+                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                  Save as a profile so future {preview.account.bank} imports are instant.
+                </div>
+              </div>
+              <input type="text" value={profileName} onChange={(e) => setProfileName(e.target.value)}
+                style={{ ...inputStyle, width: 200 }} placeholder="Profile name" />
+              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--text)", cursor: "pointer", whiteSpace: "nowrap" }}>
+                <input type="checkbox" checked={saveProfile} onChange={(e) => setSaveProfile(e.target.checked)} />
+                Save profile
+              </label>
+            </div>
+          )}
+
+          {/* Transaction preview table */}
+          <div style={{ background: "var(--bg-2)", border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden", marginBottom: 20 }}>
+            <div style={{ maxHeight: 420, overflowY: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <thead style={{ position: "sticky", top: 0, background: "var(--bg-2)", zIndex: 1 }}>
+                  <tr style={{ borderBottom: "1px solid var(--border)" }}>
+                    {["Date", "Description", "Amount"].map((h) => (
+                      <th key={h} style={{
+                        padding: "10px 20px", textAlign: h === "Amount" ? "right" : "left",
+                        fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase",
+                        color: "var(--text-muted)", fontWeight: 500,
+                      }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {preview.rows.map((row, i) => {
+                    const isIncome = row.amount > 0;
+                    const hasError = !!row.parseError;
+                    return (
+                      <tr key={i} style={{ borderBottom: "1px solid var(--border)", background: hasError ? "var(--expense-dim)" : "transparent" }}>
+                        <td style={{ padding: "9px 20px", fontSize: 12, color: "var(--text-muted)", fontFamily: "var(--font-ibm-mono)", whiteSpace: "nowrap" }}>
+                          {row.date || "—"}
+                        </td>
+                        <td style={{ padding: "9px 20px", fontSize: 13, color: hasError ? "var(--expense)" : "var(--text)", maxWidth: 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {hasError ? `⚠ ${row.parseError}` : row.description}
+                        </td>
+                        <td style={{ padding: "9px 20px", textAlign: "right", fontFamily: "var(--font-ibm-mono)", fontSize: 13, fontWeight: 500, color: hasError ? "var(--text-muted)" : isIncome ? "var(--income)" : "var(--expense)", whiteSpace: "nowrap" }}>
+                          {hasError ? "—" : `${isIncome ? "+" : ""}${formatCurrency(row.amount, "MYR")}`}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {parseError && (
+            <div style={{ padding: "12px 16px", background: "var(--expense-dim)", border: "1px solid #f8717133", borderRadius: 6, color: "var(--expense)", fontSize: 13, marginBottom: 16 }}>
+              {parseError}
+            </div>
+          )}
+
+          <div style={{ display: "flex", gap: 12 }}>
+            <button onClick={reset} style={ghostBtn}>← Back</button>
+            <button onClick={handleConfirm} disabled={confirming || validRows.length === 0} style={primaryBtn(confirming || validRows.length === 0)}>
+              {confirming ? "Importing…" : `Import ${validRows.length} transactions`}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── STEP: DONE ───────────────────────────────────────── */}
+      {step === "done" && result && (
+        <div className="fade-up fade-up-2">
+          <div style={{
+            background: "var(--bg-2)", border: "1px solid var(--border)", borderRadius: 10,
+            padding: "48px 32px", textAlign: "center",
+          }}>
+            <div style={{ fontSize: 44, marginBottom: 16 }}>✓</div>
+            <h2 style={{ fontFamily: "var(--font-syne)", fontSize: 22, fontWeight: 700, color: "var(--income)", marginBottom: 24 }}>
+              Import complete
+            </h2>
+            <div style={{ display: "flex", gap: 48, justifyContent: "center" }}>
+              <Stat label="Imported" value={String(result.importedRows)} color="var(--income)" />
+              <Stat label="Duplicates skipped" value={String(result.skippedRows)} />
+              {result.errorRows > 0 && <Stat label="Errors" value={String(result.errorRows)} color="var(--expense)" />}
+            </div>
+            <div style={{ marginTop: 36, display: "flex", gap: 12, justifyContent: "center" }}>
+              <button onClick={reset} style={ghostBtn}>Import another</button>
+              <button onClick={() => router.push("/transactions")} style={primaryBtn(false)}>
+                View transactions →
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Stat({ label, value, color }: { label: string; value: string; color?: string }) {
+  return (
+    <div>
+      <div style={{ fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 20, fontFamily: "var(--font-ibm-mono)", fontWeight: 600, color: color ?? "var(--text)" }}>{value}</div>
+    </div>
+  );
+}
+
+const inputStyle: React.CSSProperties = {
+  background: "var(--bg-3)",
+  border: "1px solid var(--border-2)",
+  borderRadius: 6,
+  color: "var(--text)",
+  fontSize: 13,
+  padding: "8px 12px",
+  outline: "none",
+  fontFamily: "inherit",
+};
+
+function primaryBtn(disabled: boolean): React.CSSProperties {
+  return {
+    padding: "10px 24px", borderRadius: 6, border: "none",
+    background: disabled ? "var(--border-2)" : "var(--accent)",
+    color: disabled ? "var(--text-muted)" : "#000",
+    fontSize: 13, fontWeight: 600,
+    cursor: disabled ? "not-allowed" : "pointer",
+    transition: "opacity 0.15s", fontFamily: "inherit",
+  };
+}
+
+const ghostBtn: React.CSSProperties = {
+  padding: "10px 20px", borderRadius: 6,
+  border: "1px solid var(--border-2)", background: "transparent",
+  color: "var(--text-muted)", fontSize: 13, cursor: "pointer", fontFamily: "inherit",
+};
