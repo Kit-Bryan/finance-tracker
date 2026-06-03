@@ -42,6 +42,7 @@ const STARTER_CATEGORIES = [
   },
   { name: "Education", color: "#6366f1", children: ["Courses", "Books", "Software"] },
   { name: "Finance", color: "#64748b", children: ["Bank Fees", "Interest", "Insurance", "Tax"] },
+  { name: "Giving", color: "#f43f5e", children: ["Treats & Meals", "Gifts", "Donations", "Tithe / Offering"] },
   { name: "Transfer", color: "#94a3b8", children: [], isTransfer: true },
   { name: "Uncategorized", color: "#d1d5db", children: [] },
 ];

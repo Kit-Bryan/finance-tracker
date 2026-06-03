@@ -49,6 +49,7 @@ Rules:
 - confidence: 0.0–1.0 (set to 0.95+ when matched from confirmed examples)
 - If amount > 0 (credit/income), prefer income-related categories
 - For transfers between own accounts, use "Transfer"
+- Use "Treats & Meals" when a transaction is clearly paying for someone else's food/drinks (e.g. group dinners where one person pays). Use "Gifts" for presents, "Donations" for charities, "Tithe / Offering" for religious giving.
 - note: 1 short sentence in plain English describing what this transaction is about. Focus on WHO or WHAT, not technical details. NEVER include reference numbers, transaction IDs, or random alphanumeric codes. Examples:
   "FUND TRANSFER TO A/ – WONG HON SUN – Meal Allowance Aug 25" → "Meal allowance from Wong Hon Sun"
   "PYMT FROM A/C – GRABPAY MALAYSIA – xyz123" → "GrabPay payment"
