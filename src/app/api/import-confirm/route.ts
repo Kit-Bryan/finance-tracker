@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
+import { eq, isNull, and } from "drizzle-orm";
 import { db } from "@/db";
 import {
   importBatches,
@@ -112,12 +112,10 @@ export async function POST(req: NextRequest) {
   const categoryNames = allCategories.map((c) => c.name);
   const categoryByName = new Map(allCategories.map((c) => [c.name.toLowerCase(), c]));
 
-  const uncategorizedIds = (
-    await db
-      .select({ id: transactions.id, description: transactions.description, amount: transactions.amount })
-      .from(transactions)
-      .where(eq(transactions.batchId, batch.id))
-  ).filter((r) => !r.description.includes("__skip"));
+  const uncategorizedIds = await db
+    .select({ id: transactions.id, description: transactions.description, amount: transactions.amount })
+    .from(transactions)
+    .where(and(eq(transactions.batchId, batch.id), isNull(transactions.categoryId)));
 
   if (uncategorizedIds.length > 0) {
     const CHUNK = 50;
