@@ -1,7 +1,7 @@
 import { getAIClient, DEFAULT_MODEL } from "./client";
 import { db } from "@/db";
 import { transactions, categories, accounts } from "@/db/schema";
-import { eq, and, ilike, isNull, lt, or, desc, gte, lte } from "drizzle-orm";
+import { eq, and, ilike, isNull, lt, or, desc, gte, lte, inArray } from "drizzle-orm";
 import { learnMerchant } from "@/lib/categorizer/rules";
 import { CONFIDENCE_THRESHOLD } from "@/lib/ai/constants";
 
@@ -250,11 +250,7 @@ async function execBulkUpdateCategory(args: { transactionIds: number[]; category
   const rows = await db
     .select({ id: transactions.id, description: transactions.description, merchantNormalized: transactions.merchantNormalized, amount: transactions.amount })
     .from(transactions)
-    .where(
-      args.transactionIds.length === 1
-        ? eq(transactions.id, args.transactionIds[0])
-        : and(...args.transactionIds.map((id) => eq(transactions.id, id)))
-    );
+    .where(inArray(transactions.id, args.transactionIds));
 
   return {
     __pending_confirmation: true,
@@ -586,10 +582,20 @@ Guidelines:
         const r = result as any;
         pendingConfirmation = {
           type: r.type,
+          // bulk_update_category
           transactionIds: r.transactionIds,
           categoryName: r.categoryName,
           categoryId: r.categoryId,
           preview: r.preview,
+          // edit_transaction
+          transactionId: r.transactionId,
+          changes: r.changes,
+          description: r.description,
+          // split_transaction
+          originalAmount: r.originalAmount,
+          originalDescription: r.originalDescription,
+          originalDate: r.originalDate,
+          splits: r.splits,
         };
       }
 
