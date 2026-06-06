@@ -4,8 +4,9 @@ import crypto from "crypto";
 import { parse as parseCsv } from "csv-parse/sync";
 import { deduplicateFingerprints } from "@/lib/parsers/dedup";
 import { extractPdfText } from "@/lib/parsers/pdf";
-import { renderPdfToImages } from "@/lib/parsers/render";
-import { suggestCsvProfile, parsePdfStatement, parseImageStatement, locateTransactionsOnImages, AccountInfo } from "@/lib/ai/parse";
+import { renderPdfToImages, extractPdfTextBoxes } from "@/lib/parsers/render";
+import { matchTransactionsToLines } from "@/lib/parsers/locate";
+import { suggestCsvProfile, parsePdfStatement, parseImageStatement, mapTransactionsToLines, AccountInfo } from "@/lib/ai/parse";
 import { parseCSV } from "@/lib/parsers/csv";
 import { ProfileConfig } from "@/lib/parsers/types";
 import { computeFingerprint } from "@/lib/parsers/fingerprint";
@@ -239,16 +240,40 @@ export async function POST(req: NextRequest) {
     }));
     const rows = deduplicateFingerprints(rawRows);
 
-    // Text-parsed PDFs have no positional info — ask the vision model to locate
-    // each row on the rendered pages so the UI can highlight on hover. Best-effort.
-    if (pageImages.length > 0 && rows.some((r) => r.yPercent == null)) {
-      const positions = await locateTransactionsOnImages(
-        pageImages,
-        rows.map((r) => ({ date: r.date, description: r.description, amount: r.amount })),
-      );
-      for (const p of positions) {
-        const row = rows[p.index];
-        if (row && row.yPercent == null) { row.page = p.page; row.yPercent = p.yPercent; }
+    // Text-parsed PDFs have no positional info. Derive it from the PDF text layer
+    // (exact, programmatic) and only fall back to the LLM — text→text, never
+    // coordinate-guessing — for the stragglers the matcher couldn't place.
+    // (Scanned PDFs already carry vision yPercent; their text layer is empty so
+    // extractPdfTextBoxes returns [] and this block is a no-op.)
+    if (rows.some((r) => r.yPercent == null)) {
+      try {
+        const bboxPages = await extractPdfTextBoxes(buffer);
+        if (bboxPages.length > 0) {
+          const { positions, unmatchedIndexes, lines } = matchTransactionsToLines(
+            rows.map((r) => ({ amount: r.amount })),
+            bboxPages,
+          );
+          for (const p of positions) {
+            const row = rows[p.index];
+            if (row && row.yPercent == null) { row.page = p.page; row.yPercent = p.yPercent; }
+          }
+
+          // LLM fallback for rows the amount-matcher missed
+          const stillUnmatched = unmatchedIndexes.filter((i) => rows[i] && rows[i].yPercent == null);
+          if (stillUnmatched.length > 0 && lines.length > 0) {
+            const mapped = await mapTransactionsToLines(
+              lines,
+              stillUnmatched.map((i) => ({ index: i, date: rows[i].date, description: rows[i].description, amount: rows[i].amount })),
+            );
+            for (const m of mapped) {
+              const row = rows[m.index];
+              const line = lines[m.lineIndex];
+              if (row && line && row.yPercent == null) { row.page = line.page; row.yPercent = line.yPercent; }
+            }
+          }
+        }
+      } catch (e) {
+        log.warn({ err: e, filename: file.name }, "programmatic transaction locating failed — highlights may be unavailable");
       }
     }
 

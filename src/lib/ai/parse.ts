@@ -1,5 +1,6 @@
 import { getAIClient, DEFAULT_MODEL } from "./client";
 import { ProfileConfig } from "@/lib/parsers/types";
+import type { StatementLine } from "@/lib/parsers/locate";
 import { logger } from "@/lib/logger";
 
 const log = logger.child({ module: "ai/parse" });
@@ -12,12 +13,6 @@ export interface ParsedTransaction {
   currency: string;
   page?: number;      // 0-based page/image index the row appears on (vision parses only)
   yPercent?: number;  // 0–1 vertical position of the row on that page (for hover-highlight)
-}
-
-export interface TxPosition {
-  index: number;      // index into the transaction list we asked about
-  page: number;       // 0-based page/image index
-  yPercent: number;   // 0–1 vertical position of the row on that page
 }
 
 export interface PdfParseResult {
@@ -242,58 +237,53 @@ ${buildStatementSpec(true)}`;
   return result;
 }
 
-// Locate already-extracted transactions on rendered page images (vision).
-// Used for text-parsed PDFs, which never went through the vision model and so
-// have no positional info. Best-effort: returns [] on any failure.
-export async function locateTransactionsOnImages(
-  imageDataUrls: string[],
-  transactions: { date: string; description: string; amount: number }[],
-): Promise<TxPosition[]> {
-  if (transactions.length === 0 || imageDataUrls.length === 0) return [];
+// Text-only fallback for the few transactions the programmatic matcher couldn't
+// place. The model never produces coordinates — it just maps each transaction to
+// a statement LINE NUMBER (text→text matching, which it's reliable at). The caller
+// looks up that line's already-known exact coordinate. Best-effort: [] on failure.
+export async function mapTransactionsToLines(
+  lines: StatementLine[],
+  txns: { index: number; date: string; description: string; amount: number }[],
+): Promise<{ index: number; lineIndex: number }[]> {
+  if (lines.length === 0 || txns.length === 0) return [];
   const ai = getAIClient();
 
-  const list = transactions
-    .map((t, i) => `${i}. ${t.date} | ${t.description} | ${t.amount}`)
+  const lineList = lines.map((l, i) => `[${i}] ${l.text}`).join("\n");
+  const txList = txns
+    .map((t) => `#${t.index}: ${t.date} | ${t.description} | ${t.amount}`)
     .join("\n");
 
-  const prompt = `These image(s) are the pages of a bank statement (first image = page 0). Below is a numbered list of transactions already extracted from this statement. For EACH one, find where its row appears on the page images and report its position.
+  const prompt = `A bank statement's text lines are listed below, each prefixed with a [number]. Match each transaction to the line number where its row appears (the line containing its amount/date/description).
+
+Statement lines:
+${lineList}
 
 Transactions:
-${list}
+${txList}
 
 Return ONLY valid JSON (no markdown):
-{ "positions": [ { "index": 0, "page": 0, "yPercent": 0.42 } ] }
+{ "map": [ { "index": <transaction #>, "lineIndex": <line number> } ] }
 
-- index: the transaction's number from the list above
-- page: 0-based index of the image the row appears on
-- yPercent: vertical center of the row as a fraction of that page's height (0.0 = top, 1.0 = bottom)
-- Include every transaction you can locate; omit any you genuinely cannot find.`;
-
-  const content: any[] = [
-    { type: "text", text: prompt },
-    ...imageDataUrls.map((url) => ({ type: "image_url", image_url: { url } })),
-  ];
+- index: the transaction number (the value after "#")
+- lineIndex: the [number] of the statement line where that transaction's row appears
+- Omit any transaction you cannot confidently place.`;
 
   const t0 = Date.now();
   try {
     const resp = await ai.chat.completions.create({
       model: DEFAULT_MODEL,
-      messages: [{ role: "user", content }],
+      messages: [{ role: "user", content: prompt }],
       temperature: 0,
     });
     const json = (resp.choices[0]?.message?.content ?? "{}").replace(/```(?:json)?/g, "").trim();
     const parsed = JSON.parse(json);
-    const positions: TxPosition[] = (parsed.positions ?? [])
-      .filter((p: any) => typeof p.index === "number" && typeof p.yPercent === "number")
-      .map((p: any) => ({
-        index: p.index,
-        page: typeof p.page === "number" ? p.page : 0,
-        yPercent: Math.max(0, Math.min(1, p.yPercent)),
-      }));
-    log.info({ model: DEFAULT_MODEL, ms: Date.now() - t0, located: positions.length, of: transactions.length }, "located transactions on images");
-    return positions;
+    const map = (parsed.map ?? [])
+      .filter((m: any) => typeof m.index === "number" && typeof m.lineIndex === "number" && m.lineIndex >= 0 && m.lineIndex < lines.length)
+      .map((m: any) => ({ index: m.index, lineIndex: m.lineIndex }));
+    log.info({ model: DEFAULT_MODEL, ms: Date.now() - t0, mapped: map.length, of: txns.length }, "mapped stragglers to statement lines");
+    return map;
   } catch (err) {
-    log.warn({ err }, "locateTransactionsOnImages failed — highlights unavailable for this import");
+    log.warn({ err }, "mapTransactionsToLines failed — some rows will have no highlight");
     return [];
   }
 }
