@@ -21,7 +21,7 @@ const server = http.createServer((req, res) => {
   if (req.method !== "POST" || !req.url.startsWith("/render")) return send(res, 404, { error: "Not found" });
 
   const url = new URL(req.url, "http://localhost");
-  const maxPages = Math.min(parseInt(url.searchParams.get("maxPages") || "10", 10) || 10, 30);
+  const maxPages = Math.min(parseInt(url.searchParams.get("maxPages") || "50", 10) || 50, 50);
   const dpi = Math.min(parseInt(url.searchParams.get("dpi") || "200", 10) || 200, 400);
 
   const chunks = [];
@@ -44,18 +44,32 @@ const server = http.createServer((req, res) => {
 
     try {
       fs.writeFileSync(pdfPath, buf);
-      // -png: PNG output, -r: DPI, -l: last page (cap)
-      execFile("pdftoppm", ["-png", "-r", String(dpi), "-l", String(maxPages), pdfPath, outPrefix], (err, _stdout, stderr) => {
-        if (err) { cleanup(); return send(res, 500, { error: "pdftoppm failed: " + (stderr || err.message) }); }
-        try {
-          const files = fs.readdirSync(dir).filter((f) => f.endsWith(".png")).sort();
-          const images = files.map((f) => fs.readFileSync(path.join(dir, f)).toString("base64"));
-          send(res, 200, { pages: images.length, images });
-        } catch (e) {
-          send(res, 500, { error: String(e && e.message || e) });
-        } finally {
-          cleanup();
+      // Read the real page count first so we can tell the caller if we capped it.
+      execFile("pdfinfo", [pdfPath], (infoErr, infoOut) => {
+        let totalPages = null;
+        if (!infoErr) {
+          const m = String(infoOut).match(/Pages:\s+(\d+)/);
+          if (m) totalPages = parseInt(m[1], 10);
         }
+        // -png: PNG output, -r: DPI, -l: last page (cap)
+        execFile("pdftoppm", ["-png", "-r", String(dpi), "-l", String(maxPages), pdfPath, outPrefix], (err, _stdout, stderr) => {
+          if (err) { cleanup(); return send(res, 500, { error: "pdftoppm failed: " + (stderr || err.message) }); }
+          try {
+            const files = fs.readdirSync(dir).filter((f) => f.endsWith(".png")).sort();
+            const images = files.map((f) => fs.readFileSync(path.join(dir, f)).toString("base64"));
+            const rendered = images.length;
+            send(res, 200, {
+              pages: rendered,
+              totalPages,
+              truncated: totalPages != null && totalPages > rendered,
+              images,
+            });
+          } catch (e) {
+            send(res, 500, { error: String(e && e.message || e) });
+          } finally {
+            cleanup();
+          }
+        });
       });
     } catch (e) {
       cleanup();

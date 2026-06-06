@@ -12,6 +12,7 @@ export interface ParsedTransaction {
 export interface PdfParseResult {
   transactions: ParsedTransaction[];
   account: AccountInfo;
+  truncated?: boolean; // true if the statement was too large to fully scan
 }
 
 export interface AccountInfo {
@@ -151,13 +152,17 @@ export async function parsePdfStatement(
   hint?: { currency?: string; bank?: string }
 ): Promise<PdfParseResult> {
   const ai = getAIClient();
-  const truncated = pdfText.length > 12000 ? pdfText.slice(0, 12000) + "\n[truncated]" : pdfText;
+  // Cap well below the model's 400k-token context but high enough for full multi-page
+  // statements (~50k tokens). The old 12k-char cap silently dropped later transactions.
+  const MAX_PDF_CHARS = 200000;
+  const isTruncated = pdfText.length > MAX_PDF_CHARS;
+  const truncatedText = isTruncated ? pdfText.slice(0, MAX_PDF_CHARS) + "\n[truncated]" : pdfText;
 
   const prompt = `You are a Malaysian financial data extractor. Extract ALL transactions from this bank statement text.
 ${hint?.bank ? `\nHint — Bank: ${hint.bank}` : ""}
 Statement text:
 ---
-${truncated}
+${truncatedText}
 ---
 
 ${STATEMENT_JSON_SPEC}`;
@@ -168,7 +173,7 @@ ${STATEMENT_JSON_SPEC}`;
     temperature: 0,
   });
 
-  return parseStatementResponse(resp.choices[0]?.message?.content ?? "");
+  return { ...parseStatementResponse(resp.choices[0]?.message?.content ?? ""), truncated: isTruncated };
 }
 
 // Ask the LLM (vision) to parse bank-statement IMAGES (screenshots / photos / scans) into transactions
