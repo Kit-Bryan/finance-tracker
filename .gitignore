@@ -30,9 +30,10 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files
-.env.local
-.env.production
+# env files (keep .env.example tracked)
+.env
+.env.*
+!.env.example
 
 # uploads
 /uploads
