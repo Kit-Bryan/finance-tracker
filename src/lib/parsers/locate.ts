@@ -57,25 +57,57 @@ export function reconstructLines(pages: BBoxPage[]): StatementLine[] {
   return lines;
 }
 
-// Score how strongly a line contains a given amount.
-// 2 = signed match (e.g. "56.60-" / "189.60+") — distinguishes the amount column
-//     from the running-balance column, very reliable.
-// 1 = bare numeric match — weaker (could be a balance or other figure).
-function amountScore(lineText: string, amount: number): number {
-  const norm = lineText.replace(/,/g, "");
-  const abs = Math.abs(amount).toFixed(2);
-  const esc = abs.replace(".", "\\.");
-  const signed = amount < 0 ? `${abs}-` : `${abs}+`;
-  if (norm.includes(signed)) return 2;
-  if (new RegExp(`(?<![\\d.])${esc}(?![\\d])`).test(norm)) return 1;
-  return 0;
+// Pull money-looking numbers out of a line. A decimal point is required, which
+// naturally excludes long reference/account integers (e.g. 202506121310...190).
+// Tolerates "RM", thousands commas, and any number of decimals (RM0.9985, 10,759.46).
+function lineAmounts(text: string): number[] {
+  const out: number[] = [];
+  const re = /\d[\d,]*\.\d+/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const v = parseFloat(m[0].replace(/,/g, ""));
+    if (!Number.isNaN(v)) out.push(v);
+  }
+  return out;
 }
 
-// Walk transactions and lines together (both are in statement order, top-to-bottom)
-// and assign each transaction the line where its amount appears. Signed matches win;
-// bare-number matches are a fallback. Anything unmatched is returned for the LLM pass.
+// Does a line contain the given amount, compared by VALUE (not string)? This makes
+// matching format-agnostic across banks — no assumptions about decimals or signs.
+function hasAmount(lineText: string, amount: number): boolean {
+  const target = Math.abs(amount);
+  return lineAmounts(lineText).some((v) => Math.abs(v - target) < 0.005);
+}
+
+// Plausible string renderings of an ISO (YYYY-MM-DD) date as they appear in
+// Malaysian statements: D/M/Y and DD/MM/YY(YY) with / - . separators, plus ISO.
+// (M/D/Y is deliberately excluded — it would create false matches and MY banks
+// don't use it.)
+function dateVariants(iso: string): string[] {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  if (!m) return [];
+  const y = m[1], yy = y.slice(2);
+  const mo1 = String(parseInt(m[2], 10)), mo2 = m[2];
+  const d1 = String(parseInt(m[3], 10)), d2 = m[3];
+  const out = new Set<string>();
+  for (const s of ["/", "-", "."]) {
+    out.add(`${d1}${s}${mo1}${s}${y}`);
+    out.add(`${d2}${s}${mo2}${s}${y}`);
+    out.add(`${d1}${s}${mo1}${s}${yy}`);
+    out.add(`${d2}${s}${mo2}${s}${yy}`);
+    out.add(`${y}${s}${mo2}${s}${d2}`);
+  }
+  return [...out];
+}
+
+const WINDOW = 120; // lines to look ahead from the last match (a few rows of slack)
+
+// Walk transactions and lines together (both in statement order, top-to-bottom).
+// A row's top line carries BOTH its date and its amount, so we prefer the first
+// line that has both — this disambiguates repeated amounts, balance-column
+// collisions, and sign-less formats (e.g. TNG eWallet). Falls back to amount-only,
+// then leaves the rest for the LLM pass.
 export function matchTransactionsToLines(
-  transactions: { amount: number }[],
+  transactions: { amount: number; date: string }[],
   pages: BBoxPage[],
 ): MatchResult {
   const lines = reconstructLines(pages);
@@ -84,14 +116,21 @@ export function matchTransactionsToLines(
   let pointer = 0;
 
   transactions.forEach((tx, index) => {
-    let strongAt = -1;
-    let weakAt = -1;
-    for (let i = pointer; i < lines.length; i++) {
-      const s = amountScore(lines[i].text, tx.amount);
-      if (s === 2) { strongAt = i; break; }
-      if (s === 1 && weakAt === -1) weakAt = i;
+    const variants = dateVariants(tx.date);
+    const end = Math.min(lines.length, pointer + WINDOW);
+
+    // Pass 1: earliest line with amount AND date (the row's top line)
+    let at = -1;
+    for (let i = pointer; i < end; i++) {
+      if (hasAmount(lines[i].text, tx.amount) && variants.some((v) => lines[i].text.includes(v))) { at = i; break; }
     }
-    const at = strongAt !== -1 ? strongAt : weakAt;
+    // Pass 2: earliest line with just the amount
+    if (at === -1) {
+      for (let i = pointer; i < end; i++) {
+        if (hasAmount(lines[i].text, tx.amount)) { at = i; break; }
+      }
+    }
+
     if (at !== -1) {
       positions.push({ index, page: lines[at].page, yPercent: lines[at].yPercent });
       pointer = at + 1; // monotonic: never match earlier than the previous row

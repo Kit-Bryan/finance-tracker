@@ -255,7 +255,7 @@ export async function POST(req: NextRequest) {
         if (bboxPages.length > 0) {
           usedTextLayer = true;
           const { positions, unmatchedIndexes, lines } = matchTransactionsToLines(
-            rows.map((r) => ({ amount: r.amount })),
+            rows.map((r) => ({ amount: r.amount, date: r.date })),
             bboxPages,
           );
           for (const p of positions) {
