@@ -34,3 +34,41 @@ export async function renderPdfToImages(
     totalPages: data.totalPages ?? null,
   };
 }
+
+export interface BBoxWord {
+  text: string;
+  xMin: number;
+  yMin: number;
+  xMax: number;
+  yMax: number;
+}
+
+export interface BBoxPage {
+  width: number;
+  height: number;
+  words: BBoxWord[];
+}
+
+// Extract per-word bounding boxes from a (text-layer) PDF via poppler's pdftotext -bbox.
+// Origin is top-left, y increasing downward — so yPercent = yCenter / page.height.
+// Returns [] on any failure (caller degrades gracefully).
+export async function extractPdfTextBoxes(
+  buffer: Buffer,
+  opts?: { maxPages?: number },
+): Promise<BBoxPage[]> {
+  const params = new URLSearchParams();
+  if (opts?.maxPages) params.set("maxPages", String(opts.maxPages));
+
+  try {
+    const res = await fetch(`${RENDERER_URL}/textbox?${params.toString()}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/pdf" },
+      body: new Uint8Array(buffer),
+    });
+    if (!res.ok) return [];
+    const data = (await res.json()) as { pages?: BBoxPage[] };
+    return data.pages ?? [];
+  } catch {
+    return [];
+  }
+}
