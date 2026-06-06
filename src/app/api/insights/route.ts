@@ -36,6 +36,11 @@ export async function GET(req: NextRequest) {
   const allCats = await db.select().from(categories).where(isNull(categories.deletedAt));
   const catMap = new Map(allCats.map((c) => [c.id, c]));
 
+  // Categories flagged as transfers (e.g. "Transfer") hold own-money movements —
+  // kept as records, but excluded from income/expense/byCategory/trend totals.
+  const transferCatIds = new Set(allCats.filter((c) => c.isTransfer).map((c) => c.id));
+  const isTransferTx = (categoryId: number | null) => categoryId != null && transferCatIds.has(categoryId);
+
   const periodTx = await db
     .select({
       id: transactions.id,
@@ -53,7 +58,9 @@ export async function GET(req: NextRequest) {
       )
     );
 
-  const reimbMap = await getReimbursementMap(periodTx.map((t) => t.id));
+  // Drop transfer-category transactions from the spending view (still recorded, just not counted)
+  const periodSpending = periodTx.filter((t) => !isTransferTx(t.categoryId));
+  const reimbMap = await getReimbursementMap(periodSpending.map((t) => t.id));
 
   // byCategory: net amounts
   const byCategoryMap = new Map<
@@ -62,7 +69,7 @@ export async function GET(req: NextRequest) {
   >();
   let totalIncome = 0, totalExpense = 0;
 
-  for (const tx of periodTx) {
+  for (const tx of periodSpending) {
     const reimbursed = reimbMap.get(tx.id) ?? 0;
     const net = parseFloat(tx.amount as string) + reimbursed;
 
@@ -96,6 +103,7 @@ export async function GET(req: NextRequest) {
       id: transactions.id,
       postedAt: transactions.postedAt,
       amount: transactions.amount,
+      categoryId: transactions.categoryId,
     })
     .from(transactions)
     .where(
@@ -107,10 +115,11 @@ export async function GET(req: NextRequest) {
       )
     );
 
-  const trendReimbMap = await getReimbursementMap(trendTx.map((t) => t.id));
+  const trendSpending = trendTx.filter((t) => !isTransferTx(t.categoryId));
+  const trendReimbMap = await getReimbursementMap(trendSpending.map((t) => t.id));
 
   const monthMap = new Map<string, { income: number; expense: number }>();
-  for (const tx of trendTx) {
+  for (const tx of trendSpending) {
     const reimbursed = trendReimbMap.get(tx.id) ?? 0;
     const net = parseFloat(tx.amount as string) + reimbursed;
     const month = new Date(tx.postedAt).toISOString().slice(0, 7);
@@ -147,7 +156,7 @@ export async function GET(req: NextRequest) {
       totalIncome,
       totalExpense,
       net: totalIncome + totalExpense,
-      txCount: periodTx.length,
+      txCount: periodSpending.length,
       uncategorized: Number(uncategorized),
     },
     byCategory,
