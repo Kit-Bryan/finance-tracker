@@ -1,51 +1,24 @@
-wait so this is wrong note?
-23 Oct 2025	
-MRT Bandar Utama
-MRT fare
-MRT BANDAR UTAMA 1
-Transport › Public Transit	Touch 'n Go eWallet	-MYR 10.00	
-✦
-✎
-⊘
-✕
-23 Oct 2025	
-GO+Balance
-Reload to GO+ balance
-Quick Reload Payment (via GO+Balance)
-Transfer	Touch 'n Go eWallet	+MYR 10.00
+30 Nov
+OKS Property
+OKS PROPERTY SDN BHD
+-MYR 10.00
+AI:
+62%
 
-Yes, based on what you've learned about GO+, that note is likely backwards.
+Restaurants
+▾
+Add a note… (optional)
+Confirm
+Skip
+30 Nov
+Daniel Kee Li Yung
+DANIEL KEE LI YUNG
++MYR 4.60
+AI:
+72%
 
-You currently have:
-
-Date	Description	Amount
-23 Oct	MRT Bandar Utama	-MYR 10.00
-23 Oct	Reload to GO+ balance / Quick Reload Payment (via GO+Balance)	+MYR 10.00
-
-The phrase "Reload to GO+ balance" suggests:
-
-eWallet → GO+
-
-But "Quick Reload Payment (via GO+Balance)" actually means:
-
-GO+ → eWallet
-
-to fund the MRT payment.
-
-So a more accurate interpretation would be:
-
-Transaction	Meaning
-+MYR 10.00 Quick Reload Payment (via GO+Balance)	GO+ funded the eWallet with RM10
--MYR 10.00 MRT Bandar Utama	eWallet paid RM10 to MRT
-
-In other words, the +MYR 10.00 is not money going into GO+. It's money coming out of GO+ and temporarily appearing in the eWallet before being spent.
-
-For your finance tracker, I'd either:
-
-Ignore the Quick Reload Payment (via GO+Balance) completely, or
-Relabel it as something like:
-"GO+ → eWallet funding"
-"GO+ withdrawal for payment"
-"Internal GO+ funding"
-
-But I would not label it "Reload to GO+ balance", because that's the opposite direction of the money flow.
+Other Income
+▾
+Add a note… (optional)
+Confirm
+Skip
