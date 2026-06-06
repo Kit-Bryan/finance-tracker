@@ -8,6 +8,8 @@ export interface ImportProfile {
 export interface ProfileConfig {
   // CSV column names (case-insensitive match)
   dateColumn: string;
+  // Optional separate time column (omit if the date column already contains a time, or there's no time)
+  timeColumn?: string;
   descriptionColumn: string;
   amountColumn: string;
   // If separate debit/credit columns instead of signed amount

@@ -13,6 +13,7 @@ import { learnMerchant } from "@/lib/categorizer/rules";
 import { categories } from "@/db/schema";
 import { PreviewRow } from "@/app/api/parse-preview/route";
 import { runAllDetectors } from "@/lib/flags/detect";
+import { combinePostedAt } from "@/lib/format";
 
 interface ConfirmBody {
   accountId: number;
@@ -64,7 +65,7 @@ export async function POST(req: NextRequest) {
     await db.insert(transactionsStaging).values(
       validRows.map((r) => ({
         batchId: batch.id,
-        rawRow: { date: r.date, description: r.description, amount: r.amount, currency: r.currency },
+        rawRow: { date: r.date, time: r.time, description: r.description, amount: r.amount, currency: r.currency },
         fingerprint: r.fingerprint,
         promoted: false,
       }))
@@ -86,14 +87,14 @@ export async function POST(req: NextRequest) {
           accountId,
           batchId: batch.id,
           categoryId: catResult.categoryId ?? undefined,
-          postedAt: new Date(row.date),
+          postedAt: combinePostedAt(row.date, row.time),
           amount: String(row.amount),
           currency: row.currency,
           description: row.description,
           fingerprint: row.fingerprint,
           categorySource: catResult.source,
           categoryConfidence: catResult.confidence > 0 ? String(catResult.confidence) : null,
-          rawRow: { date: row.date, description: row.description, amount: row.amount },
+          rawRow: { date: row.date, time: row.time, description: row.description, amount: row.amount },
         })
         .onConflictDoNothing()
         .returning();

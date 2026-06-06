@@ -13,6 +13,7 @@ import { importProfiles, accounts } from "@/db/schema";
 
 export interface PreviewRow {
   date: string;
+  time?: string;   // "HH:MM" (24h) when the source includes a transaction time
   description: string;
   amount: number;
   currency: string;
@@ -20,8 +21,16 @@ export interface PreviewRow {
   parseError?: string;
 }
 
+// Derive "HH:MM" (UTC) from a Date, or undefined if the time is midnight (date-only).
+function utcTimeString(d: Date): string | undefined {
+  const hh = d.getUTCHours();
+  const mm = d.getUTCMinutes();
+  if (hh === 0 && mm === 0 && d.getUTCSeconds() === 0) return undefined;
+  return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+}
+
 export interface PreviewResponse {
-  type: "csv" | "pdf";
+  type: "csv" | "pdf" | "image";
   rows: PreviewRow[];
   suggestedProfile?: Record<string, unknown>;
   profileId?: number;
@@ -120,6 +129,7 @@ export async function POST(req: NextRequest) {
 
     const rawRows: PreviewRow[] = transactions.map((r) => ({
       date: r.date,
+      time: r.time,
       description: r.description,
       amount: r.amount,
       currency: r.currency || "MYR",
@@ -186,6 +196,7 @@ export async function POST(req: NextRequest) {
 
   const rawRows: PreviewRow[] = allRows.map((r) => ({
     date: r.date.toISOString().slice(0, 10),
+    time: r.parseError ? undefined : utcTimeString(r.date),
     description: r.description,
     amount: r.amount,
     currency: r.currency,

@@ -5,6 +5,7 @@ import { db } from "@/db";
 import { transactions, importBatches } from "@/db/schema";
 import { categorizeByRules } from "@/lib/categorizer/rules";
 import { PreviewRow } from "@/app/api/parse-preview/route";
+import { combinePostedAt } from "@/lib/format";
 
 interface ForceBody {
   batchId: number;
@@ -35,14 +36,14 @@ export async function POST(req: NextRequest) {
         accountId,
         batchId,
         categoryId: catResult.categoryId ?? undefined,
-        postedAt: new Date(row.date),
+        postedAt: combinePostedAt(row.date, row.time),
         amount: String(row.amount),
         currency: row.currency,
         description: row.description,
         fingerprint: forceFingerprint,
         categorySource: catResult.source,
         categoryConfidence: catResult.confidence > 0 ? String(catResult.confidence) : null,
-        rawRow: { date: row.date, description: row.description, amount: row.amount },
+        rawRow: { date: row.date, time: row.time, description: row.description, amount: row.amount },
       });
       imported++;
     } catch {

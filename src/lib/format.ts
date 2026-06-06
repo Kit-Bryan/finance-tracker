@@ -30,3 +30,29 @@ export function startOfMonth(): string {
 export function today(): string {
   return new Date().toISOString().slice(0, 10);
 }
+
+// ── Timestamp helpers ──────────────────────────────────────────────────────────
+// Transactions are stored with their literal statement wall-clock time in the UTC
+// frame (date-only rows stay at 00:00 UTC, identical to before). Display in UTC so
+// the time shown matches the statement regardless of the viewer's timezone.
+
+// Build a postedAt timestamp from a "YYYY-MM-DD" date and optional "HH:MM[:SS]" time.
+export function combinePostedAt(date: string, time?: string | null): Date {
+  const [y, m, d] = date.split("-").map(Number);
+  if (time && /^\d{1,2}:\d{2}/.test(time.trim())) {
+    const [hh, mm, ss] = time.trim().split(":").map((n) => parseInt(n, 10) || 0);
+    return new Date(Date.UTC(y, m - 1, d, hh, mm, ss || 0));
+  }
+  return new Date(Date.UTC(y, m - 1, d));
+}
+
+export function formatTxDate(d: string | Date): string {
+  return new Date(d).toLocaleDateString("en-MY", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+}
+
+// Returns "h:mm AM/PM" in UTC, or null when the time is midnight (i.e. date-only).
+export function formatTxTime(d: string | Date): string | null {
+  const date = new Date(d);
+  if (date.getUTCHours() === 0 && date.getUTCMinutes() === 0 && date.getUTCSeconds() === 0) return null;
+  return date.toLocaleTimeString("en-MY", { hour: "numeric", minute: "2-digit", hour12: true, timeZone: "UTC" });
+}

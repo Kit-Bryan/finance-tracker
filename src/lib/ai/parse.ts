@@ -3,6 +3,7 @@ import { ProfileConfig } from "@/lib/parsers/types";
 
 export interface ParsedTransaction {
   date: string;       // YYYY-MM-DD
+  time?: string;      // HH:MM (24h) — only when the statement includes a time
   description: string;
   amount: number;     // negative = expense, positive = income
   currency: string;
@@ -48,6 +49,7 @@ Return ONLY valid JSON (no markdown, no explanation):
   },
   "config": {
     "dateColumn": "exact header name for the date",
+    "timeColumn": "exact header name for a SEPARATE time column if one exists — omit if there's no time, or if the time is part of the date column",
     "descriptionColumn": "exact header name for the description/merchant",
     "amountColumn": "exact header name if ONE signed amount column — omit if separate debit/credit",
     "debitColumn": "exact header name for debits if separate — omit if using amountColumn",
