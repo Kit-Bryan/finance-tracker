@@ -509,7 +509,10 @@ export default function ImportPage() {
                   <div style={{ width: `${zoom * 100}%`, transition: "width 0.15s" }}>
                     {comparisonImages.map((src, i) => {
                       const showBand = !!band && band.page === i;
-                      const pinned = hoveredRow == null && selectedRow != null;
+                      // Pinned (blue) whenever the active row IS the selected row —
+                      // including while hovering it. Gold preview is only for hovering
+                      // a different, not-yet-pinned row.
+                      const pinned = activeRow != null && activeRow === selectedRow;
                       return (
                         <div key={i} style={{ position: "relative" }}>
                           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -573,10 +576,10 @@ export default function ImportPage() {
                           onClick={() => { if (locatable) setSelectedRow((s) => (s === i ? null : i)); }}
                           style={{
                             borderBottom: "1px solid var(--border)",
-                            background: hoveredRow === i && locatable
-                              ? "var(--accent-dim)"                 // gold hover — matches dashed gold band
-                              : selectedRow === i && locatable
-                                ? "rgba(74,144,226,0.14)"           // blue pinned — matches blue band
+                            background: selectedRow === i && locatable
+                              ? "rgba(74,144,226,0.14)"             // blue pinned — wins even while hovered
+                              : hoveredRow === i && locatable
+                                ? "var(--accent-dim)"               // gold hover — only for unpinned rows
                                 : hasError ? "var(--expense-dim)" : "transparent",
                             borderLeft: selectedRow === i && locatable ? "3px solid #2f6fd0" : "2px solid transparent",
                             cursor: locatable ? "pointer" : "default",
