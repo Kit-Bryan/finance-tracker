@@ -4,6 +4,7 @@ import crypto from "crypto";
 import { parse as parseCsv } from "csv-parse/sync";
 import { deduplicateFingerprints } from "@/lib/parsers/dedup";
 import { extractPdfText } from "@/lib/parsers/pdf";
+import { renderPdfToImages } from "@/lib/parsers/render";
 import { suggestCsvProfile, parsePdfStatement, parseImageStatement, AccountInfo } from "@/lib/ai/parse";
 import { parseCSV } from "@/lib/parsers/csv";
 import { ProfileConfig } from "@/lib/parsers/types";
@@ -158,20 +159,35 @@ export async function POST(req: NextRequest) {
     } satisfies PreviewResponse);
   }
 
-  // ── PDF path ──────────────────────────────────────────────────────────────
+  // ── PDF path (text-first, vision fallback for scanned / text-less PDFs) ──────
   if (isPdf) {
-    let pdfText: string;
+    let pdfText = "";
     try {
       pdfText = await extractPdfText(buffer);
-    } catch (e) {
-      return NextResponse.json({ error: `PDF extraction failed: ${e}` }, { status: 422 });
+    } catch {
+      pdfText = ""; // treat as text-less → vision fallback below
     }
 
+    const hasTextLayer = pdfText.trim().length >= 100;
     let result;
     try {
-      result = await parsePdfStatement(pdfText);
+      if (hasTextLayer) {
+        result = await parsePdfStatement(pdfText);
+        // Digital PDF whose text parsed to nothing useful → try vision as a backstop
+        if (result.transactions.length === 0) {
+          const images = await renderPdfToImages(buffer);
+          result = await parseImageStatement(images);
+        }
+      } else {
+        // No extractable text → scanned/image PDF → must rasterize and use vision
+        const images = await renderPdfToImages(buffer);
+        result = await parseImageStatement(images);
+      }
     } catch (e) {
-      return NextResponse.json({ error: `AI parsing failed: ${e}` }, { status: 500 });
+      const hint = hasTextLayer
+        ? `AI parsing failed: ${e}`
+        : `This PDF has no text layer (likely scanned) and the PDF renderer is unavailable: ${e}`;
+      return NextResponse.json({ error: hint }, { status: hasTextLayer ? 500 : 422 });
     }
 
     const { transactions, account } = result;
