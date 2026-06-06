@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { transactions, categories, accounts, importBatches } from "@/db/schema";
 import { eq, desc, isNotNull, and } from "drizzle-orm";
+import { permanentlyDeleteTransactions } from "@/lib/trash";
 
 export async function GET() {
   // Deleted transactions, grouped with their batch info
@@ -29,4 +30,17 @@ export async function GET() {
     .limit(500);
 
   return NextResponse.json(deleted);
+}
+
+// Empty the trash — permanently delete all soft-deleted transactions
+export async function DELETE() {
+  const ids = (
+    await db
+      .select({ id: transactions.id })
+      .from(transactions)
+      .where(isNotNull(transactions.deletedAt))
+  ).map((r) => r.id);
+
+  const deleted = await permanentlyDeleteTransactions(ids);
+  return NextResponse.json({ ok: true, deleted });
 }

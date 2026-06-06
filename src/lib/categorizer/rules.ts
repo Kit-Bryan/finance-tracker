@@ -1,6 +1,6 @@
 import { db } from "@/db";
 import { categorizationRules, merchants, transactions } from "@/db/schema";
-import { eq, desc, and } from "drizzle-orm";
+import { eq, desc, and, isNull, inArray } from "drizzle-orm";
 
 export interface CategoryResult {
   categoryId: number | null;
@@ -9,7 +9,7 @@ export interface CategoryResult {
   ruleId?: number;
 }
 
-function normalizeMerchant(description: string): string {
+export function normalizeMerchant(description: string): string {
   return description
     .toLowerCase()
     .replace(/\s+\d+$/, "")        // trailing numbers (branch codes)
@@ -74,6 +74,28 @@ export async function categorizeByRules(description: string): Promise<CategoryRe
   }
 
   return { categoryId: null, source: "none", confidence: 0 };
+}
+
+/**
+ * Forget merchant-memory entries for the given (now-deleted) transaction descriptions,
+ * but ONLY when no live (non-deleted) transaction still maps to that normalized merchant.
+ * This keeps memory from being influenced by deleted data without forgetting merchants
+ * that are still in active use.
+ */
+export async function pruneOrphanMerchants(descriptions: string[]) {
+  const targets = new Set(descriptions.map(normalizeMerchant).filter(Boolean));
+  if (targets.size === 0) return;
+
+  const live = await db
+    .select({ description: transactions.description })
+    .from(transactions)
+    .where(isNull(transactions.deletedAt));
+  const liveNorms = new Set(live.map((t) => normalizeMerchant(t.description)));
+
+  const orphans = [...targets].filter((n) => !liveNorms.has(n));
+  if (orphans.length === 0) return;
+
+  await db.delete(merchants).where(inArray(merchants.normalizedName, orphans));
 }
 
 export async function learnMerchant(

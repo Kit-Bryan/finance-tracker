@@ -92,6 +92,8 @@ export default function TransactionsContent() {
   const [trashItems, setTrashItems] = useState<TrashItem[]>([]);
   const [trashLoading, setTrashLoading] = useState(false);
   const [restoringId, setRestoringId] = useState<number | null>(null);
+  const [purgingId, setPurgingId] = useState<number | null>(null);
+  const [emptyingTrash, setEmptyingTrash] = useState(false);
   const [expandedDescriptions, setExpandedDescriptions] = useState<Set<number>>(new Set());
   const [editingNoteId, setEditingNoteId] = useState<number | null>(null);
   const [noteDraft, setNoteDraft] = useState("");
@@ -153,6 +155,22 @@ export default function TransactionsContent() {
     setRestoringId(null);
     setTrashItems((prev) => prev.filter((t) => t.id !== txId));
     fetchAll(filters, page);
+  }
+
+  async function permanentlyDelete(txId: number) {
+    if (!confirm("Permanently delete this transaction? This cannot be undone.")) return;
+    setPurgingId(txId);
+    await fetch(`/api/trash/${txId}`, { method: "DELETE" });
+    setPurgingId(null);
+    setTrashItems((prev) => prev.filter((t) => t.id !== txId));
+  }
+
+  async function emptyTrash() {
+    if (!confirm(`Permanently delete all ${trashItems.length} transaction${trashItems.length !== 1 ? "s" : ""} in trash? This cannot be undone.`)) return;
+    setEmptyingTrash(true);
+    await fetch("/api/trash", { method: "DELETE" });
+    setEmptyingTrash(false);
+    setTrashItems([]);
   }
 
   useEffect(() => {
@@ -480,6 +498,13 @@ export default function TransactionsContent() {
             <>
               <div style={{ padding: "12px 20px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <span style={{ fontSize: 12, color: "var(--text-muted)" }}>{trashItems.length} deleted transaction{trashItems.length !== 1 ? "s" : ""}</span>
+                <button
+                  onClick={emptyTrash}
+                  disabled={emptyingTrash}
+                  style={{ padding: "5px 14px", borderRadius: 5, border: "1px solid #f8717133", background: "var(--expense-dim)", color: "var(--expense)", fontSize: 12, cursor: emptyingTrash ? "wait" : "pointer", fontFamily: "inherit" }}
+                >
+                  {emptyingTrash ? "Emptying…" : "Empty trash"}
+                </button>
               </div>
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead>
@@ -525,13 +550,23 @@ export default function TransactionsContent() {
                           {item.batchFilename ?? "—"}
                         </td>
                         <td style={{ padding: "10px 12px" }}>
-                          <button
-                            onClick={() => restoreTransaction(item.id)}
-                            disabled={restoringId === item.id}
-                            style={{ padding: "4px 12px", borderRadius: 5, border: "1px solid var(--border-2)", background: "var(--bg-3)", color: "var(--income)", fontSize: 12, cursor: "pointer" }}
-                          >
-                            {restoringId === item.id ? "…" : "Restore"}
-                          </button>
+                          <div style={{ display: "flex", gap: 6 }}>
+                            <button
+                              onClick={() => restoreTransaction(item.id)}
+                              disabled={restoringId === item.id || purgingId === item.id}
+                              style={{ padding: "4px 12px", borderRadius: 5, border: "1px solid var(--border-2)", background: "var(--bg-3)", color: "var(--income)", fontSize: 12, cursor: "pointer" }}
+                            >
+                              {restoringId === item.id ? "…" : "Restore"}
+                            </button>
+                            <button
+                              onClick={() => permanentlyDelete(item.id)}
+                              disabled={purgingId === item.id || restoringId === item.id}
+                              title="Delete forever"
+                              style={{ padding: "4px 12px", borderRadius: 5, border: "1px solid #f8717133", background: "transparent", color: "var(--expense)", fontSize: 12, cursor: "pointer" }}
+                            >
+                              {purgingId === item.id ? "…" : "Delete forever"}
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );

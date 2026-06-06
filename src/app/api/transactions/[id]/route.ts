@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { transactions } from "@/db/schema";
-import { learnMerchant } from "@/lib/categorizer/rules";
+import { learnMerchant, pruneOrphanMerchants } from "@/lib/categorizer/rules";
 
 export async function PATCH(
   req: NextRequest,
@@ -50,6 +50,9 @@ export async function DELETE(
     .update(transactions)
     .set({ deletedAt: new Date(), updatedAt: new Date() })
     .where(eq(transactions.id, id));
+
+  // Forget merchant memory if no live transaction still backs it
+  await pruneOrphanMerchants([tx.description]);
 
   return NextResponse.json({ ok: true });
 }
