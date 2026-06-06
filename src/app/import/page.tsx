@@ -16,6 +16,8 @@ interface PreviewRow {
   currency: string;
   fingerprint: string;
   parseError?: string;
+  page?: number;
+  yPercent?: number;
 }
 
 interface AccountInfo {
@@ -71,12 +73,32 @@ export default function ImportPage() {
   const [showOriginal, setShowOriginal] = useState(true);
   const [fileUrl, setFileUrl] = useState<string | null>(null);
 
+  // Hover-to-highlight + zoom for the rendered statement comparison
+  const [hoveredRow, setHoveredRow] = useState<number | null>(null);
+  const [zoom, setZoom] = useState(1);
+  const imgPaneRef = useRef<HTMLDivElement>(null);
+  const pageRefs = useRef<Record<number, HTMLImageElement | null>>({});
+
   useEffect(() => {
     if (!file) { setFileUrl(null); return; }
     const url = URL.createObjectURL(file);
     setFileUrl(url);
     return () => URL.revokeObjectURL(url);
   }, [file]);
+
+  // When a transaction row is hovered, scroll its location into view on the statement image
+  useEffect(() => {
+    if (hoveredRow == null || !preview) return;
+    const row = preview.rows[hoveredRow];
+    if (!row || row.yPercent == null) return;
+    const img = pageRefs.current[row.page ?? 0];
+    const pane = imgPaneRef.current;
+    if (!img || !pane) return;
+    const imgRect = img.getBoundingClientRect();
+    const paneRect = pane.getBoundingClientRect();
+    const target = (imgRect.top - paneRect.top) + row.yPercent * imgRect.height + pane.scrollTop - pane.clientHeight / 2;
+    pane.scrollTo({ top: target, behavior: "smooth" });
+  }, [hoveredRow, preview, zoom]);
 
   const onDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
