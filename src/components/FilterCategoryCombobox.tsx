@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Category } from "./CategoryCombobox";
+import { categoryMatchesQuery } from "@/lib/categoryAliases";
 
 interface Props {
   value: string; // "" = all, "none" = uncategorized, "123" = category id
@@ -67,12 +68,12 @@ export default function FilterCategoryCombobox({ value, onChange, categories }: 
     }
 
     const matched = new Set<number>();
-    categories.filter((c) => c.name.toLowerCase().includes(q)).forEach((c) => matched.add(c.id));
-    parentCats.filter((p) => p.name.toLowerCase().includes(q)).forEach((p) => {
+    categories.filter((c) => categoryMatchesQuery(c.name, q)).forEach((c) => matched.add(c.id));
+    parentCats.filter((p) => categoryMatchesQuery(p.name, q)).forEach((p) => {
       matched.add(p.id);
       childrenOf(p.id).forEach((c) => matched.add(c.id));
     });
-    categories.filter((c) => c.parentId && c.name.toLowerCase().includes(q)).forEach((c) => {
+    categories.filter((c) => c.parentId && categoryMatchesQuery(c.name, q)).forEach((c) => {
       if (c.parentId) matched.add(c.parentId);
     });
 

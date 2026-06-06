@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { categoryMatchesQuery } from "@/lib/categoryAliases";
 
 export interface Category {
   id: number;
@@ -69,11 +70,11 @@ export default function CategoryCombobox({
     if (!q) return null;
 
     const directMatches = new Set(
-      categories.filter((c) => c.name.toLowerCase().includes(q)).map((c) => c.id)
+      categories.filter((c) => categoryMatchesQuery(c.name, q)).map((c) => c.id)
     );
 
     // If query hits a parent, also include all its children
-    const matchingParents = parentCats.filter((p) => p.name.toLowerCase().includes(q));
+    const matchingParents = parentCats.filter((p) => categoryMatchesQuery(p.name, q));
     for (const parent of matchingParents) {
       for (const child of childrenOf(parent.id)) {
         directMatches.add(child.id);
@@ -83,7 +84,7 @@ export default function CategoryCombobox({
 
     // If query hits a child, also include its parent and siblings for context
     const matchingChildren = categories.filter(
-      (c) => c.parentId && c.name.toLowerCase().includes(q)
+      (c) => c.parentId && categoryMatchesQuery(c.name, q)
     );
     for (const child of matchingChildren) {
       if (child.parentId) directMatches.add(child.parentId);
