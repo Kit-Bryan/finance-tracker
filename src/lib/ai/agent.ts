@@ -1,8 +1,8 @@
 import { getAIClient, DEFAULT_MODEL } from "./client";
 import { db } from "@/db";
 import { transactions, categories, accounts } from "@/db/schema";
-import { eq, and, ilike, isNull, lt, or, desc, gte, lte, inArray } from "drizzle-orm";
-import { learnMerchant } from "@/lib/categorizer/rules";
+import { eq, and, ilike, isNull, lt, gt, or, desc, gte, lte, inArray } from "drizzle-orm";
+import { learnMerchant, pruneOrphanMerchants } from "@/lib/categorizer/rules";
 import { CONFIDENCE_THRESHOLD } from "@/lib/ai/constants";
 
 export interface AgentMessage {
@@ -22,7 +22,7 @@ export interface AgentResponse {
 }
 
 export interface PendingAction {
-  type: "bulk_update_category" | "edit_transaction" | "split_transaction";
+  type: "bulk_update_category" | "edit_transaction" | "split_transaction" | "link_reimbursements";
   // bulk_update_category
   transactionIds?: number[];
   categoryName?: string;
@@ -37,6 +37,15 @@ export interface PendingAction {
   originalDescription?: string;
   originalDate?: string;
   splits?: { amount: number; description: string; notes?: string; categoryName?: string | null; categoryId?: number | null }[];
+  // link_reimbursements
+  expenseId?: number;
+  expenseDescription?: string;
+  expenseAmount?: number;
+  expenseDate?: string;
+  expenseCategoryName?: string | null;
+  reimbursementTransactions?: { id: number; description: string; amount: number; date: string }[];
+  totalReimbursed?: number;
+  yourShare?: number;
 }
 
 // ── Tool definitions ──────────────────────────────────────────────────────────
@@ -171,6 +180,34 @@ const TOOLS = [
   {
     type: "function" as const,
     function: {
+      name: "suggest_reimbursements",
+      description: "Scan recent transactions to find incoming transfers that look like reimbursements for group expenses (e.g. paid for a group dinner and friends paid you back). Returns proposed matches — present them to the user, then call link_reimbursements to confirm.",
+      parameters: {
+        type: "object",
+        properties: {
+          lookbackDays: { type: "number", description: "How many days back to scan, default 30" },
+        },
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "link_reimbursements",
+      description: "Link a set of incoming transfers as reimbursements for a specific expense. Always call suggest_reimbursements first or get IDs from the user. Returns a confirmation card before applying.",
+      parameters: {
+        type: "object",
+        properties: {
+          expenseId: { type: "number", description: "The original group expense transaction ID" },
+          reimbursementIds: { type: "array", items: { type: "number" }, description: "IDs of the incoming transfers to link as reimbursements" },
+        },
+        required: ["expenseId", "reimbursementIds"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
       name: "create_category",
       description: "Create a new category. Can be top-level or a subcategory under an existing parent.",
       parameters: {
@@ -191,7 +228,7 @@ async function execSearchTransactions(args: {
   query?: string; categoryName?: string; uncategorized?: boolean;
   from?: string; to?: string; limit?: number;
 }) {
-  const allCategories = await db.select().from(categories);
+  const allCategories = await db.select().from(categories).where(isNull(categories.deletedAt));
   const conditions = [];
 
   if (args.uncategorized) conditions.push(isNull(transactions.categoryId));
@@ -242,7 +279,7 @@ async function execSearchTransactions(args: {
 }
 
 async function execBulkUpdateCategory(args: { transactionIds: number[]; categoryName: string }) {
-  const allCategories = await db.select().from(categories);
+  const allCategories = await db.select().from(categories).where(isNull(categories.deletedAt));
   const cat = allCategories.find((c) => c.name.toLowerCase() === args.categoryName.toLowerCase());
   if (!cat) return { error: `Category "${args.categoryName}" not found` };
 
@@ -282,7 +319,7 @@ async function execExplainTransaction(args: { transactionId: number }) {
 
   if (!tx) return { error: "Transaction not found" };
 
-  const allCategories = await db.select().from(categories);
+  const allCategories = await db.select().from(categories).where(isNull(categories.deletedAt));
   const cat = allCategories.find((c) => c.id === tx.categoryId);
 
   return {
@@ -328,7 +365,7 @@ async function execGetReviewQueue() {
 }
 
 async function execGetCategories() {
-  const cats = await db.select({ id: categories.id, name: categories.name, parentId: categories.parentId, color: categories.color }).from(categories);
+  const cats = await db.select({ id: categories.id, name: categories.name, parentId: categories.parentId, color: categories.color }).from(categories).where(isNull(categories.deletedAt));
   return cats;
 }
 
@@ -339,7 +376,7 @@ async function execEditTransaction(args: {
   const [tx] = await db.select().from(transactions).where(eq(transactions.id, args.transactionId));
   if (!tx) return { error: `Transaction ${args.transactionId} not found.` };
 
-  const allCats = await db.select().from(categories);
+  const allCats = await db.select().from(categories).where(isNull(categories.deletedAt));
   const cat = args.categoryName
     ? allCats.find((c) => c.name.toLowerCase() === args.categoryName!.toLowerCase())
     : null;
@@ -370,7 +407,7 @@ async function execSplitTransaction(args: {
   const [tx] = await db.select().from(transactions).where(eq(transactions.id, args.transactionId));
   if (!tx) return { error: `Transaction ${args.transactionId} not found.` };
 
-  const allCats = await db.select().from(categories);
+  const allCats = await db.select().from(categories).where(isNull(categories.deletedAt));
   const originalAmount = parseFloat(tx.amount as string);
   const splitTotal = args.splits.reduce((s, r) => s + r.amount, 0);
 
@@ -400,7 +437,7 @@ async function execSplitTransaction(args: {
 }
 
 async function execUpdateCategory(args: { name: string; newName?: string; color?: string }) {
-  const allCats = await db.select().from(categories);
+  const allCats = await db.select().from(categories).where(isNull(categories.deletedAt));
   const cat = allCats.find((c) => c.name.toLowerCase() === args.name.toLowerCase());
   if (!cat) return { error: `Category "${args.name}" not found.` };
 
@@ -443,7 +480,7 @@ const CATEGORY_COLORS = [
 ];
 
 async function execCreateCategory(args: { name: string; parentName?: string }) {
-  const allCats = await db.select().from(categories);
+  const allCats = await db.select().from(categories).where(isNull(categories.deletedAt));
 
   const existing = allCats.find((c) => c.name.toLowerCase() === args.name.toLowerCase());
   if (existing) return { id: existing.id, name: existing.name, alreadyExisted: true };
@@ -470,6 +507,122 @@ async function execCreateCategory(args: { name: string; parentName?: string }) {
   return { id: created.id, name: created.name, parentId: created.parentId, color: created.color, created: true };
 }
 
+async function execSuggestReimbursements(args: { lookbackDays?: number }) {
+  const lookback = args.lookbackDays ?? 30;
+  const since = new Date();
+  since.setDate(since.getDate() - lookback);
+
+  // All non-deleted, non-already-linked transactions in the window
+  const allTx = await db
+    .select({
+      id: transactions.id,
+      postedAt: transactions.postedAt,
+      description: transactions.description,
+      merchantNormalized: transactions.merchantNormalized,
+      amount: transactions.amount,
+      categoryId: transactions.categoryId,
+      reimbursementForId: transactions.reimbursementForId,
+    })
+    .from(transactions)
+    .where(and(gte(transactions.postedAt, since), isNull(transactions.deletedAt), isNull(transactions.reimbursementForId)))
+    .orderBy(desc(transactions.postedAt));
+
+  const allCategories = await db.select().from(categories).where(isNull(categories.deletedAt));
+
+  // Outgoing expenses above MYR 30
+  const expenses = allTx.filter((t) => parseFloat(t.amount as string) < -30);
+
+  // Incoming person-to-person transfers
+  const incoming = allTx.filter((t) => {
+    if (parseFloat(t.amount as string) <= 0) return false;
+    const desc = ((t.description ?? "") + " " + (t.merchantNormalized ?? "")).toLowerCase();
+    return (
+      desc.includes("fund tr") || desc.includes("duitnow") || desc.includes("ibk") ||
+      desc.includes(" trf ") || desc.includes("transfer") || desc.includes("fpx") ||
+      desc.includes("a/c") || desc.includes("interbank") || desc.includes("pymt from") ||
+      desc.includes("payment from") || desc.includes("received from")
+    );
+  });
+
+  const proposals: object[] = [];
+
+  for (const expense of expenses) {
+    const expDate = new Date(expense.postedAt);
+    const windowEnd = new Date(expDate);
+    windowEnd.setDate(windowEnd.getDate() + 7);
+
+    const candidates = incoming.filter((t) => {
+      const tDate = new Date(t.postedAt);
+      return tDate >= expDate && tDate <= windowEnd;
+    });
+
+    if (candidates.length === 0) continue;
+
+    const totalReimbursed = candidates.reduce((s, t) => s + parseFloat(t.amount as string), 0);
+    const expenseAbs = Math.abs(parseFloat(expense.amount as string));
+
+    if (totalReimbursed < expenseAbs * 0.3) continue;
+
+    const cat = allCategories.find((c) => c.id === expense.categoryId);
+    proposals.push({
+      expense: {
+        id: expense.id,
+        date: new Date(expense.postedAt).toISOString().slice(0, 10),
+        description: expense.merchantNormalized || expense.description,
+        amount: parseFloat(expense.amount as string),
+        categoryName: cat?.name ?? null,
+      },
+      reimbursements: candidates.map((t) => ({
+        id: t.id,
+        date: new Date(t.postedAt).toISOString().slice(0, 10),
+        description: t.merchantNormalized || t.description,
+        amount: parseFloat(t.amount as string),
+      })),
+      totalReimbursed,
+      yourShare: parseFloat(expense.amount as string) + totalReimbursed,
+    });
+  }
+
+  if (proposals.length === 0) {
+    return { message: `No reimbursement patterns found in the last ${lookback} days. Try a longer window or check manually.` };
+  }
+  return proposals;
+}
+
+async function execLinkReimbursements(args: { expenseId: number; reimbursementIds: number[] }) {
+  const [expense] = await db.select().from(transactions).where(eq(transactions.id, args.expenseId));
+  if (!expense) return { error: `Expense transaction ${args.expenseId} not found.` };
+
+  const allCats = await db.select().from(categories).where(isNull(categories.deletedAt));
+  const cat = allCats.find((c) => c.id === expense.categoryId);
+
+  const reimbs = await db
+    .select()
+    .from(transactions)
+    .where(inArray(transactions.id, args.reimbursementIds));
+
+  const totalReimbursed = reimbs.reduce((s, t) => s + parseFloat(t.amount as string), 0);
+  const yourShare = parseFloat(expense.amount as string) + totalReimbursed;
+
+  return {
+    __pending_confirmation: true,
+    type: "link_reimbursements",
+    expenseId: expense.id,
+    expenseDescription: expense.merchantNormalized || expense.description,
+    expenseAmount: parseFloat(expense.amount as string),
+    expenseDate: new Date(expense.postedAt).toISOString().slice(0, 10),
+    expenseCategoryName: cat?.name ?? null,
+    reimbursementTransactions: reimbs.map((t) => ({
+      id: t.id,
+      description: t.merchantNormalized || t.description,
+      amount: parseFloat(t.amount as string),
+      date: new Date(t.postedAt).toISOString().slice(0, 10),
+    })),
+    totalReimbursed,
+    yourShare,
+  };
+}
+
 // ── Main agent loop ───────────────────────────────────────────────────────────
 
 export interface ContextTransaction {
@@ -488,7 +641,7 @@ export async function runAgentTurn(
   contextTransaction?: ContextTransaction | null
 ): Promise<AgentResponse> {
   const ai = getAIClient();
-  const allCategories = await db.select().from(categories);
+  const allCategories = await db.select().from(categories).where(isNull(categories.deletedAt));
   const allAccounts = await db.select().from(accounts);
 
   const txContext = contextTransaction
@@ -520,7 +673,8 @@ Guidelines:
 - Be concise. Use bullet points for lists of transactions.
 - If a transaction is ambiguous, ask clarifying questions rather than guessing.
 - When explaining a transaction, consider the Malaysian context (GrabPay, Touch n Go, Maybank, etc.)
-- Amounts are in MYR. Negative = expense, positive = income.`;
+- Amounts are in MYR. Negative = expense, positive = income.
+- You CAN find group-expense reimbursements using suggest_reimbursements. Use it when the user mentions paying for friends, group dinners, or wanting to see their real share. Then call link_reimbursements so the dashboard shows the netted amount instead of the full group cost.`;
 
   const messages: any[] = [
     { role: "system", content: systemPrompt },
@@ -571,6 +725,8 @@ Guidelines:
       else if (name === "split_transaction") result = await execSplitTransaction(args);
       else if (name === "update_category") result = await execUpdateCategory(args);
       else if (name === "create_category") result = await execCreateCategory(args);
+      else if (name === "suggest_reimbursements") result = await execSuggestReimbursements(args);
+      else if (name === "link_reimbursements") result = await execLinkReimbursements(args);
       else result = { error: "Unknown tool" };
 
       // Extract pending confirmation if present
@@ -596,6 +752,15 @@ Guidelines:
           originalDescription: r.originalDescription,
           originalDate: r.originalDate,
           splits: r.splits,
+          // link_reimbursements
+          expenseId: r.expenseId,
+          expenseDescription: r.expenseDescription,
+          expenseAmount: r.expenseAmount,
+          expenseDate: r.expenseDate,
+          expenseCategoryName: r.expenseCategoryName,
+          reimbursementTransactions: r.reimbursementTransactions,
+          totalReimbursed: r.totalReimbursed,
+          yourShare: r.yourShare,
         };
       }
 
@@ -645,7 +810,7 @@ export async function confirmPendingAction(action: PendingAction): Promise<{ upd
     // find categoryId from changes if category was updated
     const catChange = action.changes?.find(c => c.field === "category");
     if (catChange) {
-      const allCats = await db.select().from(categories);
+      const allCats = await db.select().from(categories).where(isNull(categories.deletedAt));
       const cat = allCats.find(c => c.name === catChange.newValue);
       if (cat) { updates.categoryId = cat.id; updates.categorySource = "user"; updates.categoryConfidence = "1"; }
     }
@@ -686,7 +851,26 @@ export async function confirmPendingAction(action: PendingAction): Promise<{ upd
       inserted++;
     }
 
+    // Forget the original's merchant memory if no live transaction still backs it
+    await pruneOrphanMerchants([original.description]);
+
     return { updated: inserted, message: `Split into ${inserted} transactions` };
+  }
+
+  // ── link_reimbursements ───────────────────────────────────────────────────
+  if (action.type === "link_reimbursements") {
+    const reimbs = action.reimbursementTransactions ?? [];
+    for (const r of reimbs) {
+      await db
+        .update(transactions)
+        .set({ reimbursementForId: action.expenseId!, updatedAt: new Date() })
+        .where(eq(transactions.id, r.id));
+    }
+    const share = Math.abs(action.yourShare ?? 0).toFixed(2);
+    return {
+      updated: reimbs.length,
+      message: `Linked ${reimbs.length} reimbursement${reimbs.length !== 1 ? "s" : ""} to **${action.expenseDescription}**. Your share: **MYR ${share}**. The dashboard will now show your net expense.`,
+    };
   }
 
   return { updated: 0 };

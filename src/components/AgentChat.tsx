@@ -13,7 +13,7 @@ interface Message {
 }
 
 interface PendingAction {
-  type: "bulk_update_category" | "edit_transaction" | "split_transaction";
+  type: "bulk_update_category" | "edit_transaction" | "split_transaction" | "link_reimbursements";
   // bulk
   transactionIds?: number[];
   categoryName?: string;
@@ -28,6 +28,15 @@ interface PendingAction {
   originalDescription?: string;
   originalDate?: string;
   splits?: { amount: number; description: string; notes?: string; categoryName?: string | null; categoryId?: number | null }[];
+  // link_reimbursements
+  expenseId?: number;
+  expenseDescription?: string;
+  expenseAmount?: number;
+  expenseDate?: string;
+  expenseCategoryName?: string | null;
+  reimbursementTransactions?: { id: number; description: string; amount: number; date: string }[];
+  totalReimbursed?: number;
+  yourShare?: number;
 }
 
 interface ChatSession {
@@ -184,7 +193,7 @@ export default function AgentChat({ open, onClose, onTransactionsChanged, contex
     : [
         "What transactions need review?",
         "Categorize all GrabPay as Food & Drink",
-        "Show me uncategorized transactions",
+        "Find group dinner reimbursements",
         "What did I spend most on this month?",
       ];
 
@@ -426,6 +435,45 @@ function ConfirmCard({ action, onConfirm, onDismiss, confirming }: {
             </div>
             <div style={{ marginTop: 6, fontSize: 11, color: "var(--text-muted)" }}>
               Original will be moved to trash
+            </div>
+          </>
+        )}
+
+        {/* link_reimbursements */}
+        {action.type === "link_reimbursements" && (
+          <>
+            <div style={{ fontSize: 12, color: "var(--accent)", fontWeight: 600, marginBottom: 8 }}>
+              Link reimbursements → {action.expenseDescription}
+            </div>
+            {/* Original expense row */}
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 6, paddingBottom: 6, borderBottom: "1px solid #c9a84c22" }}>
+              <span style={{ color: "var(--text-muted)" }}>{action.expenseDate} · {action.expenseCategoryName ?? "Uncategorized"}</span>
+              <span style={{ fontFamily: "var(--font-ibm-mono)", color: "var(--expense)" }}>
+                {formatCurrency(action.expenseAmount ?? 0, "MYR")}
+              </span>
+            </div>
+            {/* Reimbursement rows */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 3, marginBottom: 8 }}>
+              {action.reimbursementTransactions?.map((r) => (
+                <div key={r.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+                  <span style={{ color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 240 }}>
+                    ↩ {r.description}
+                  </span>
+                  <span style={{ fontFamily: "var(--font-ibm-mono)", color: "var(--income)", whiteSpace: "nowrap", marginLeft: 8 }}>
+                    +{formatCurrency(r.amount, "MYR")}
+                  </span>
+                </div>
+              ))}
+            </div>
+            {/* Net result */}
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, paddingTop: 6, borderTop: "1px solid #c9a84c22" }}>
+              <span style={{ color: "var(--text)", fontWeight: 600 }}>Your share</span>
+              <span style={{ fontFamily: "var(--font-ibm-mono)", fontWeight: 600, color: (action.yourShare ?? 0) < 0 ? "var(--expense)" : "var(--income)" }}>
+                {formatCurrency(action.yourShare ?? 0, "MYR")}
+              </span>
+            </div>
+            <div style={{ marginTop: 6, fontSize: 11, color: "var(--text-muted)" }}>
+              The dashboard will show MYR {Math.abs(action.yourShare ?? 0).toFixed(2)} instead of MYR {Math.abs(action.expenseAmount ?? 0).toFixed(2)} for this expense.
             </div>
           </>
         )}
