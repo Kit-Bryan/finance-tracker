@@ -704,6 +704,7 @@ function AddModal({ categories: initialCategories, accounts, onClose, onSaved }:
   onClose: () => void; onSaved: () => void;
 }) {
   const [form, setForm] = useState({ description: "", amount: "", postedAt: today(), accountId: accounts[0]?.id ? String(accounts[0].id) : "", categoryId: "" as string | number, notes: "" });
+  const [amountType, setAmountType] = useState<"expense" | "income">("expense");
   const [saving, setSaving] = useState(false);
   const [localCategories, setLocalCategories] = useState(initialCategories);
   const [selectedCategory, setSelectedCategory] = useState<CategoryValue | null>(null);
@@ -711,12 +712,13 @@ function AddModal({ categories: initialCategories, accounts, onClose, onSaved }:
   async function submit() {
     if (!form.description || !form.amount || !form.accountId) return;
     setSaving(true);
+    const absAmount = Math.abs(parseFloat(form.amount as string));
     await fetch("/api/transactions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         ...form,
-        amount: parseFloat(form.amount as string),
+        amount: amountType === "expense" ? -absAmount : absAmount,
         accountId: parseInt(form.accountId),
         categoryId: selectedCategory?.id ?? null,
       }),
@@ -724,6 +726,13 @@ function AddModal({ categories: initialCategories, accounts, onClose, onSaved }:
     setSaving(false);
     onSaved();
   }
+
+  const toggleStyle = (active: boolean): React.CSSProperties => ({
+    padding: "7px 16px", borderRadius: 5, border: "none", fontSize: 12, fontWeight: 600,
+    cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s",
+    background: active ? (amountType === "expense" ? "var(--expense)" : "var(--income)") : "var(--bg-3)",
+    color: active ? "#fff" : "var(--text-muted)",
+  });
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "#00000088", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }} onClick={onClose}>
@@ -734,8 +743,14 @@ function AddModal({ categories: initialCategories, accounts, onClose, onSaved }:
             <input type="text" value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} style={{ ...selectStyle, width: "100%" }} placeholder="e.g. Lunch at Nasi Kandar" />
           </Field>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <Field label="Amount * (negative = expense)">
-              <input type="number" step="0.01" value={form.amount} onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))} style={{ ...selectStyle, width: "100%" }} placeholder="-25.00" />
+            <Field label="Amount *">
+              <div style={{ display: "flex", gap: 6 }}>
+                <div style={{ display: "flex", background: "var(--bg-3)", border: "1px solid var(--border-2)", borderRadius: 6, padding: 3, gap: 2, flexShrink: 0 }}>
+                  <button type="button" onClick={() => setAmountType("expense")} style={toggleStyle(amountType === "expense")}>Expense</button>
+                  <button type="button" onClick={() => setAmountType("income")} style={toggleStyle(amountType === "income")}>Income</button>
+                </div>
+                <input type="number" step="0.01" min="0" value={form.amount} onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))} style={{ ...selectStyle, width: "100%", minWidth: 0 }} placeholder="25.00" />
+              </div>
             </Field>
             <Field label="Date *">
               <input type="date" value={form.postedAt} onChange={(e) => setForm((f) => ({ ...f, postedAt: e.target.value }))} style={{ ...selectStyle, width: "100%" }} />
