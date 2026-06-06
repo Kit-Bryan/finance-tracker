@@ -40,6 +40,8 @@ export interface PreviewResponse {
   accountIsNew: boolean;
   totalRows: number;
   errorRows: number;
+  truncated?: boolean;       // true if the document was too large to fully scan
+  truncationNote?: string;   // human-readable explanation
 }
 
 function mimeFromName(name: string): string {
@@ -170,18 +172,26 @@ export async function POST(req: NextRequest) {
 
     const hasTextLayer = pdfText.trim().length >= 100;
     let result;
+    let truncated = false;
+    let truncationNote: string | undefined;
     try {
       if (hasTextLayer) {
         result = await parsePdfStatement(pdfText);
+        if (result.truncated) {
+          truncated = true;
+          truncationNote = "This statement's text was longer than we can scan in one pass — some later transactions may be missing.";
+        }
         // Digital PDF whose text parsed to nothing useful → try vision as a backstop
         if (result.transactions.length === 0) {
-          const images = await renderPdfToImages(buffer);
-          result = await parseImageStatement(images);
+          const r = await renderPdfToImages(buffer);
+          result = await parseImageStatement(r.images);
+          if (r.truncated) { truncated = true; truncationNote = `Only the first ${r.images.length} of ${r.totalPages} pages were scanned — some transactions may be missing.`; }
         }
       } else {
         // No extractable text → scanned/image PDF → must rasterize and use vision
-        const images = await renderPdfToImages(buffer);
-        result = await parseImageStatement(images);
+        const r = await renderPdfToImages(buffer);
+        result = await parseImageStatement(r.images);
+        if (r.truncated) { truncated = true; truncationNote = `Only the first ${r.images.length} of ${r.totalPages} pages were scanned — some transactions may be missing.`; }
       }
     } catch (e) {
       const hint = hasTextLayer
@@ -211,6 +221,8 @@ export async function POST(req: NextRequest) {
       accountIsNew,
       totalRows: rows.length,
       errorRows: 0,
+      truncated,
+      truncationNote,
     } satisfies PreviewResponse);
   }
 

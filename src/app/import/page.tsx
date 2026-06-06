@@ -35,6 +35,8 @@ interface PreviewResponse {
   accountIsNew: boolean;
   totalRows: number;
   errorRows: number;
+  truncated?: boolean;
+  truncationNote?: string;
 }
 
 const ACCEPT = ".csv,.pdf,.png,.jpg,.jpeg,.webp,.gif,.bmp,text/csv,application/pdf,image/*";
@@ -320,6 +322,22 @@ export default function ImportPage() {
               {preview.type.toUpperCase()}
             </span>
           </div>
+
+          {/* Truncation warning — we couldn't scan the whole document */}
+          {preview.truncated && (
+            <div style={{ background: "var(--expense-dim)", border: "1px solid #f8717155", borderRadius: 8, padding: "12px 18px", marginBottom: 14, display: "flex", gap: 10, alignItems: "flex-start" }}>
+              <span style={{ fontSize: 16, lineHeight: 1 }}>⚠️</span>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "var(--expense)", marginBottom: 2 }}>
+                  This statement may be incomplete
+                </div>
+                <div style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: 1.5 }}>
+                  {preview.truncationNote ?? "The document was too large to scan in full — some transactions may be missing."}
+                  {" "}Consider splitting it into smaller files and importing each, then check the totals against your statement.
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Save profile prompt (CSV, new layout) */}
           {preview.type === "csv" && preview.suggestedProfile && !preview.profileId && (
