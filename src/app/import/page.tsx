@@ -40,6 +40,7 @@ interface PreviewResponse {
   truncated?: boolean;
   truncationNote?: string;
   pageImages?: string[];
+  positionAccuracy?: "exact" | "approximate" | "none";
 }
 
 const ACCEPT = ".csv,.pdf,.png,.jpg,.jpeg,.webp,.gif,.bmp,text/csv,application/pdf,image/*";
@@ -76,12 +77,14 @@ export default function ImportPage() {
   // Hover-to-highlight (transient) + click-to-pin (persists) + zoom
   const [hoveredRow, setHoveredRow] = useState<number | null>(null);
   const [selectedRow, setSelectedRow] = useState<number | null>(null);
+  const [autoHighlight, setAutoHighlight] = useState(true);
   const [zoom, setZoom] = useState(1);
   const imgPaneRef = useRef<HTMLDivElement>(null);
   const pageRefs = useRef<Record<number, HTMLImageElement | null>>({});
 
   // Hover takes precedence for live preview; selection persists when not hovering.
-  const activeRow = hoveredRow != null ? hoveredRow : selectedRow;
+  // Gated by the auto-highlight toggle (the pin is remembered while it's off).
+  const activeRow = autoHighlight ? (hoveredRow != null ? hoveredRow : selectedRow) : null;
 
   useEffect(() => {
     if (!file) { setFileUrl(null); return; }
@@ -464,7 +467,18 @@ export default function ImportPage() {
             <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10, marginBottom: 10 }}>
               {splitView && (
                 <>
-                  <span style={{ fontSize: 11, color: "var(--text-dim)" }}>Hover to locate · click to pin{selectedRow != null ? " · click again to unpin" : ""}</span>
+                  {preview.positionAccuracy && preview.positionAccuracy !== "none" && (
+                    <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--text-muted)", cursor: "pointer", whiteSpace: "nowrap" }}>
+                      <input type="checkbox" checked={autoHighlight} onChange={(e) => setAutoHighlight(e.target.checked)} style={{ accentColor: "var(--accent)" }} />
+                      Auto-highlight &amp; scroll
+                    </label>
+                  )}
+                  {autoHighlight && preview.positionAccuracy === "exact" && (
+                    <span style={{ fontSize: 11, color: "var(--text-dim)" }}>Hover to locate · click to pin{selectedRow != null ? " · click again to unpin" : ""}</span>
+                  )}
+                  {autoHighlight && preview.positionAccuracy === "approximate" && (
+                    <span style={{ fontSize: 11, color: "#d99a3a" }} title="Positions are estimated by the AI from the image, not read from a text layer — they may be off.">≈ positions are approximate</span>
+                  )}
                   <div style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: "auto" }}>
                     <button onClick={() => setZoom((z) => Math.max(0.5, +(z - 0.25).toFixed(2)))} style={zoomBtn} title="Zoom out">−</button>
                     <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-ibm-mono)", minWidth: 40, textAlign: "center" }}>{Math.round(zoom * 100)}%</span>
@@ -551,10 +565,10 @@ export default function ImportPage() {
                     {preview.rows.map((row, i) => {
                       const isIncome = row.amount > 0;
                       const hasError = !!row.parseError;
-                      const locatable = splitView && row.yPercent != null;
+                      const locatable = splitView && autoHighlight && row.yPercent != null;
                       return (
                         <tr key={i}
-                          onMouseEnter={() => setHoveredRow(i)}
+                          onMouseEnter={() => { if (locatable) setHoveredRow(i); }}
                           onMouseLeave={() => setHoveredRow((h) => (h === i ? null : h))}
                           onClick={() => { if (locatable) setSelectedRow((s) => (s === i ? null : i)); }}
                           style={{
