@@ -1,12 +1,10 @@
-version: "3.9"
-
 services:
   db:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
       POSTGRES_USER: finance
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-finance}
       POSTGRES_DB: finance
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -25,7 +23,7 @@ services:
       db:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://finance:${POSTGRES_PASSWORD:-changeme}@db:5432/finance
+      DATABASE_URL: postgresql://finance:${POSTGRES_PASSWORD:-finance}@db:5432/finance
       APP_PASSWORD: ${APP_PASSWORD:-}
     ports:
       - "3000:3000"

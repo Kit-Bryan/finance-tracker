@@ -15,6 +15,9 @@ FROM base AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 
+# postgres-client is needed for the /api/export route (pg_dump)
+RUN apk add --no-cache postgresql-client
+
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nextjs
 

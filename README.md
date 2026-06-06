@@ -1,65 +1,74 @@
 # Finance Tracker
 
-Personal finance app — import bank CSVs, auto-categorize transactions, and generate spending insights.
+Personal finance app — import bank CSVs and PDFs, auto-categorize with AI, chat with an agent that can edit, split, and reorganize transactions.
 
 ---
 
-## Requirements
+## Quick start (new machine)
 
-- [Node.js 20+](https://nodejs.org)
-- [Docker](https://www.docker.com) (for Postgres)
-- `pg_dump` / `pg_restore` on your PATH (for export/import)
-
----
-
-## Setup
-
-### 1. Install dependencies
+**Prerequisites:** [Docker](https://www.docker.com), [Node 20+](https://nodejs.org)
 
 ```bash
-npm install
+git clone <repo> finance-tracker
+cd finance-tracker
+npm run setup
 ```
 
-### 2. Configure environment
+That single command will:
 
-```bash
-cp .env.example .env.local
-```
+1. Check Docker + Node versions
+2. Create `.env.local` and prompt for your LiteLLM API key
+3. `npm install`
+4. Start Postgres in Docker
+5. Apply all schema migrations
+6. Seed the starter categories
 
-Edit `.env.local`:
-
-| Variable | Required | Description |
-|---|---|---|
-| `DATABASE_URL` | Yes | Postgres connection string |
-| `LITELLM_API_KEY` | Yes* | LiteLLM proxy API key |
-| `LITELLM_BASE_URL` | Yes* | LiteLLM proxy base URL |
-| `OPENAI_API_KEY` | Optional | If set, uses OpenAI directly — LiteLLM is ignored |
-| `APP_PASSWORD` | Optional | Simple password to protect the app |
-
-*Not required if `OPENAI_API_KEY` is set.
-
-**LLM priority:** `OPENAI_API_KEY` wins over LiteLLM. Default model: `gpt-5.1`.
-
-### 3. Start Postgres
-
-```bash
-docker compose up -d db
-```
-
-### 4. Push schema + seed categories
-
-```bash
-npm run db:push
-npm run db:seed
-```
-
-### 5. Run the app
+When it's done:
 
 ```bash
 npm run dev
 ```
 
-App is at [http://localhost:3000](http://localhost:3000).
+Open <http://localhost:3000>.
+
+---
+
+## Moving your data between machines
+
+### Export
+
+```bash
+npm run export              # writes finance-YYYY-MM-DD.dump
+npm run export my-backup.dump   # custom filename
+```
+
+This runs `pg_dump` inside the Docker container — no local Postgres client needed.
+
+### Import
+
+Copy the `.dump` file to the new machine (after running `npm run setup` there), then:
+
+```bash
+npm run import my-backup.dump
+```
+
+You'll be asked to confirm — this **replaces** all data in the current database.
+
+---
+
+## Configuration
+
+`.env.local`:
+
+| Variable | Required | Description |
+|---|---|---|
+| `DATABASE_URL` | Yes | Auto-set by setup. Points at the Docker Postgres. |
+| `LITELLM_API_KEY` | Yes* | Your LiteLLM proxy key |
+| `LITELLM_BASE_URL` | Yes* | LiteLLM proxy base URL |
+| `OPENAI_API_KEY` | Optional | If set, OpenAI is used directly and LiteLLM is ignored |
+| `APP_PASSWORD` | Optional | Local app password |
+
+*Not required if `OPENAI_API_KEY` is set. Default model: `gpt-5.1`.
 
 ---
 
@@ -67,24 +76,18 @@ App is at [http://localhost:3000](http://localhost:3000).
 
 | Command | Description |
 |---|---|
+| `npm run setup` | One-time fresh-machine setup |
 | `npm run dev` | Start dev server |
-| `npm run db:push` | Sync schema to database |
-| `npm run db:seed` | Load starter categories |
+| `npm run export [file]` | Dump database to file |
+| `npm run import <file>` | Restore database from dump |
 | `npm run db:studio` | Open Drizzle Studio (visual DB browser) |
-| `npm run db:generate` | Generate a new migration file |
+| `npm run db:generate` | Generate a new migration after schema changes |
 
 ---
 
-## Moving to another machine
+## Architecture notes
 
-**Export** — download a full DB dump from the running app:
-
-```bash
-curl http://localhost:3000/api/export -o backup.dump
-```
-
-**Import** — restore into a fresh Postgres:
-
-```bash
-./scripts/import.sh backup.dump
-```
+- **AI layer**: OpenAI-compatible API (LiteLLM proxy or OpenAI direct). All AI calls flow through `src/lib/ai/client.ts`.
+- **Soft deletes**: Transactions and import batches use `deleted_at` timestamps. Partial unique index on `fingerprint` means deleted rows release their slot so re-imports work.
+- **Agent tools**: `src/lib/ai/agent.ts` defines the tools available to the chat agent (search, edit, split, categorize, create/update categories, link reimbursements).
+- **Currency**: MYR throughout. Change defaults in `src/db/schema/index.ts` if needed.
