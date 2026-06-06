@@ -30,7 +30,7 @@ export async function getConfirmedExamples(limit = 40): Promise<CategoryExample[
     .orderBy(desc(transactions.updatedAt))
     .limit(200); // fetch more, then de-dupe
 
-  const allCats = await db.select().from(categories);
+  const allCats = await db.select().from(categories).where(isNull(categories.deletedAt));
   const catById = new Map(allCats.map((c) => [c.id, c.name]));
 
   // De-dupe by merchant name

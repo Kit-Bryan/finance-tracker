@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq, isNull, and, inArray } from "drizzle-orm";
+import { eq, isNull, and, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { transactions, categories } from "@/db/schema";
 import { bulkCategorize } from "@/lib/ai/categorize";
@@ -12,7 +12,7 @@ export async function POST(req: NextRequest) {
   const { transactionIds } = body as { transactionIds?: number[] };
 
   // Load categories
-  const allCategories = await db.select().from(categories);
+  const allCategories = await db.select().from(categories).where(isNull(categories.deletedAt));
   const categoryNames = allCategories.map((c) => c.name);
   const categoryByName = new Map(allCategories.map((c) => [c.name.toLowerCase(), c]));
 

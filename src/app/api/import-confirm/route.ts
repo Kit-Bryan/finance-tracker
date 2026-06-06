@@ -108,7 +108,7 @@ export async function POST(req: NextRequest) {
   }
 
   // AI bulk categorize: transactions that rules couldn't categorize
-  const allCategories = await db.select().from(categories);
+  const allCategories = await db.select().from(categories).where(isNull(categories.deletedAt));
   const categoryNames = allCategories.map((c) => c.name);
   const categoryByName = new Map(allCategories.map((c) => [c.name.toLowerCase(), c]));
 

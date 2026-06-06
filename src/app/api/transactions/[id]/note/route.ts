@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
+import { eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { transactions, categories } from "@/db/schema";
 import { getAIClient, DEFAULT_MODEL } from "@/lib/ai/client";
@@ -18,7 +18,7 @@ export async function POST(
 
   if (!tx) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  const allCats = await db.select().from(categories);
+  const allCats = await db.select().from(categories).where(isNull(categories.deletedAt));
   const cat = allCats.find((c) => c.id === tx.categoryId);
   const ai = getAIClient();
 

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { categories } from "@/db/schema";
 import { getAIClient, DEFAULT_MODEL } from "@/lib/ai/client";
@@ -7,7 +8,7 @@ import { getConfirmedExamples } from "@/lib/ai/examples";
 export async function POST(req: NextRequest) {
   const { description, hint, amount } = await req.json();
 
-  const allCategories = await db.select().from(categories);
+  const allCategories = await db.select().from(categories).where(isNull(categories.deletedAt));
   const examples = await getConfirmedExamples(30);
   const ai = getAIClient();
 
