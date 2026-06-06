@@ -229,7 +229,8 @@ async function execSearchTransactions(args: {
   from?: string; to?: string; limit?: number;
 }) {
   const allCategories = await db.select().from(categories).where(isNull(categories.deletedAt));
-  const conditions = [];
+  // Exclude soft-deleted (trashed) transactions — never present them as live.
+  const conditions = [isNull(transactions.deletedAt)];
 
   if (args.uncategorized) conditions.push(isNull(transactions.categoryId));
   if (args.from) conditions.push(gte(transactions.postedAt, new Date(args.from)));
@@ -240,7 +241,13 @@ async function execSearchTransactions(args: {
     if (cat) conditions.push(eq(transactions.categoryId, cat.id));
   }
 
-  let rows = await db
+  // Filter the keyword in SQL BEFORE the limit, so matches aren't missed beyond the most-recent N.
+  if (args.query) {
+    const pattern = `%${args.query}%`;
+    conditions.push(or(ilike(transactions.description, pattern), ilike(transactions.merchantNormalized, pattern))!);
+  }
+
+  const rows = await db
     .select({
       id: transactions.id,
       postedAt: transactions.postedAt,
@@ -252,18 +259,9 @@ async function execSearchTransactions(args: {
       categoryConfidence: transactions.categoryConfidence,
     })
     .from(transactions)
-    .where(conditions.length > 0 ? and(...conditions) : undefined)
+    .where(and(...conditions))
     .orderBy(desc(transactions.postedAt))
     .limit(args.limit ?? 20);
-
-  if (args.query) {
-    const q = args.query.toLowerCase();
-    rows = rows.filter(
-      (r) =>
-        r.description.toLowerCase().includes(q) ||
-        (r.merchantNormalized ?? "").toLowerCase().includes(q)
-    );
-  }
 
   return rows.map((r) => ({
     id: r.id,
