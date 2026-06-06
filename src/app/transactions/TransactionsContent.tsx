@@ -78,6 +78,8 @@ export default function TransactionsContent() {
     categoryId: filterParam === "uncategorized" ? "none" : "",
     search: "",
   });
+  // Separate typed value so we can debounce before triggering a fetch
+  const [searchInput, setSearchInput] = useState(filters.search);
 
   const [editingId, setEditingId] = useState<number | null>(null);
   const [savingId, setSavingId] = useState<number | null>(null);
@@ -108,10 +110,10 @@ export default function TransactionsContent() {
     if (f.to) params.set("to", f.to);
     if (f.accountId) params.set("accountId", f.accountId);
     if (f.categoryId && f.categoryId !== "none") params.set("categoryId", f.categoryId);
+    if (f.search) params.set("search", f.search);
     const data = await fetch(`/api/transactions?${params}`).then((r) => r.json());
     let rows: Transaction[] = data.rows ?? [];
     if (f.categoryId === "none") rows = rows.filter((tx) => !tx.categoryId);
-    if (f.search) { const q = f.search.toLowerCase(); rows = rows.filter((tx) => (tx.merchantNormalized ?? tx.description).toLowerCase().includes(q)); }
     setTransactions(rows);
     setTotal(data.total ?? 0);
     setLoading(false);
@@ -180,6 +182,15 @@ export default function TransactionsContent() {
     ]).then(([cats, accs]) => { setCategories(cats); setAccounts(accs); });
     fetchBatches();
   }, []);
+
+  // Debounce search input → filters.search (300 ms)
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setFilters((f) => ({ ...f, search: searchInput }));
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [searchInput]);
 
   useEffect(() => { fetchAll(filters, page); }, [filters, page, fetchAll]);
 
@@ -315,10 +326,10 @@ export default function TransactionsContent() {
             </div>
             <div style={{ flex: 1, minWidth: 160, display: "flex", flexDirection: "column", gap: 4 }}>
               <label style={labelStyle}>Search</label>
-              <input type="text" placeholder="Search descriptions…" value={filters.search} onChange={(e) => { setFilters((f) => ({ ...f, search: e.target.value })); setPage(1); }} style={{ ...selectStyle, width: "100%" }} />
+              <input type="text" placeholder="Search merchant, description, notes…" value={searchInput} onChange={(e) => setSearchInput(e.target.value)} style={{ ...selectStyle, width: "100%" }} />
             </div>
-            {(filters.categoryId || filters.accountId || filters.search) && (
-              <button onClick={() => { setFilters((f) => ({ ...f, accountId: "", categoryId: "", search: "" })); setPage(1); }} style={{ fontSize: 12, color: "var(--text-muted)", background: "none", border: "none", cursor: "pointer", paddingBottom: 2 }}>
+            {(filters.categoryId || filters.accountId || searchInput) && (
+              <button onClick={() => { setFilters((f) => ({ ...f, accountId: "", categoryId: "", search: "" })); setSearchInput(""); setPage(1); }} style={{ fontSize: 12, color: "var(--text-muted)", background: "none", border: "none", cursor: "pointer", paddingBottom: 2 }}>
                 Clear
               </button>
             )}

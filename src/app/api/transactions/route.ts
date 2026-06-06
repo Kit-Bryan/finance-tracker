@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { transactions, categories, accounts } from "@/db/schema";
-import { eq, and, gte, lte, sql, desc, isNull } from "drizzle-orm";
+import { eq, and, gte, lte, sql, desc, isNull, or, ilike } from "drizzle-orm";
 import { computeFingerprint } from "@/lib/parsers/fingerprint";
 
 export async function GET(req: NextRequest) {
@@ -13,12 +13,27 @@ export async function GET(req: NextRequest) {
   const categoryId = searchParams.get("categoryId");
   const from = searchParams.get("from");
   const to = searchParams.get("to");
+  const search = searchParams.get("search")?.trim();
 
   const conditions = [isNull(transactions.deletedAt)];
   if (accountId) conditions.push(eq(transactions.accountId, parseInt(accountId)));
   if (categoryId) conditions.push(eq(transactions.categoryId, parseInt(categoryId)));
   if (from) conditions.push(gte(transactions.postedAt, new Date(from)));
-  if (to) conditions.push(lte(transactions.postedAt, new Date(to)));
+  if (to) {
+    const toEnd = new Date(to);
+    toEnd.setHours(23, 59, 59, 999);
+    conditions.push(lte(transactions.postedAt, toEnd));
+  }
+  if (search) {
+    const pattern = `%${search}%`;
+    conditions.push(
+      or(
+        ilike(transactions.description, pattern),
+        ilike(transactions.merchantNormalized, pattern),
+        ilike(transactions.notes, pattern),
+      )!
+    );
+  }
 
   const rows = await db
     .select({
