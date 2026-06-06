@@ -420,9 +420,20 @@ export default function ImportPage() {
             </details>
           )}
 
-          {/* Toggle: show rendered pages side by side with parsed transactions */}
+          {/* Toggle + zoom controls */}
           {canShowOriginal && (
-            <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
+            <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10, marginBottom: 10 }}>
+              {splitView && (
+                <>
+                  <span style={{ fontSize: 11, color: "var(--text-dim)" }}>Hover a transaction to find it on the statement</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: "auto" }}>
+                    <button onClick={() => setZoom((z) => Math.max(0.5, +(z - 0.25).toFixed(2)))} style={zoomBtn} title="Zoom out">−</button>
+                    <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-ibm-mono)", minWidth: 40, textAlign: "center" }}>{Math.round(zoom * 100)}%</span>
+                    <button onClick={() => setZoom((z) => Math.min(3, +(z + 0.25).toFixed(2)))} style={zoomBtn} title="Zoom in">+</button>
+                    {zoom !== 1 && <button onClick={() => setZoom(1)} style={{ ...zoomBtn, width: "auto", padding: "0 8px", fontSize: 11 }} title="Reset zoom">Reset</button>}
+                  </div>
+                </>
+              )}
               <button onClick={() => setShowOriginal((s) => !s)} style={ghostBtn}>
                 {showOriginal ? "Hide comparison" : "Compare side by side ⇄"}
               </button>
@@ -441,11 +452,33 @@ export default function ImportPage() {
                 <div style={{ padding: "10px 16px", borderBottom: "1px solid var(--border)", fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   Statement — {file?.name}
                 </div>
-                <div style={{ maxHeight: 600, overflowY: "auto", background: "#fff" }}>
-                  {comparisonImages.map((src, i) => (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img key={i} src={src} alt={`Statement page ${i + 1}`} style={{ width: "100%", display: "block", borderBottom: i < comparisonImages.length - 1 ? "1px solid #ddd" : "none" }} />
-                  ))}
+                <div ref={imgPaneRef} style={{ maxHeight: 600, overflow: "auto", background: "#fff" }}>
+                  <div style={{ width: `${zoom * 100}%`, transition: "width 0.15s" }}>
+                    {comparisonImages.map((src, i) => {
+                      const hovered = hoveredRow != null && preview ? preview.rows[hoveredRow] : null;
+                      const showStrip = !!hovered && (hovered.page ?? 0) === i && hovered.yPercent != null;
+                      return (
+                        <div key={i} style={{ position: "relative" }}>
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            ref={(el) => { pageRefs.current[i] = el; }}
+                            src={src}
+                            alt={`Statement page ${i + 1}`}
+                            style={{ width: "100%", display: "block", borderBottom: i < comparisonImages.length - 1 ? "1px solid #ddd" : "none" }}
+                          />
+                          {showStrip && (
+                            <div style={{
+                              position: "absolute", left: 0, right: 0,
+                              top: `${hovered!.yPercent! * 100}%`, transform: "translateY(-50%)",
+                              height: 32, background: "rgba(201,168,76,0.28)",
+                              borderTop: "2px solid #c9a84c", borderBottom: "2px solid #c9a84c",
+                              pointerEvents: "none", transition: "top 0.15s",
+                            }} />
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
             )}
@@ -469,8 +502,17 @@ export default function ImportPage() {
                     {preview.rows.map((row, i) => {
                       const isIncome = row.amount > 0;
                       const hasError = !!row.parseError;
+                      const locatable = splitView && row.yPercent != null;
                       return (
-                        <tr key={i} style={{ borderBottom: "1px solid var(--border)", background: hasError ? "var(--expense-dim)" : "transparent" }}>
+                        <tr key={i}
+                          onMouseEnter={() => setHoveredRow(i)}
+                          onMouseLeave={() => setHoveredRow((h) => (h === i ? null : h))}
+                          style={{
+                            borderBottom: "1px solid var(--border)",
+                            background: hoveredRow === i && locatable ? "var(--accent-dim)" : hasError ? "var(--expense-dim)" : "transparent",
+                            cursor: locatable ? "pointer" : "default",
+                            transition: "background 0.1s",
+                          }}>
                           <td style={{ padding: "9px 20px", fontSize: 12, color: "var(--text-muted)", fontFamily: "var(--font-ibm-mono)", whiteSpace: "nowrap" }}>
                             {row.date || "—"}{row.time ? ` ${row.time}` : ""}
                           </td>
@@ -646,4 +688,11 @@ const ghostBtn: React.CSSProperties = {
   padding: "10px 20px", borderRadius: 6,
   border: "1px solid var(--border-2)", background: "transparent",
   color: "var(--text-muted)", fontSize: 13, cursor: "pointer", fontFamily: "inherit",
+};
+
+const zoomBtn: React.CSSProperties = {
+  width: 26, height: 26, borderRadius: 5,
+  border: "1px solid var(--border-2)", background: "var(--bg-3)",
+  color: "var(--text)", fontSize: 14, cursor: "pointer",
+  display: "inline-flex", alignItems: "center", justifyContent: "center", fontFamily: "inherit",
 };
