@@ -93,6 +93,24 @@ export default function ImportPage() {
     return () => URL.revokeObjectURL(url);
   }, [file]);
 
+  // Statement pane wheel gestures: Cmd/Ctrl+scroll (and trackpad pinch) to zoom,
+  // Shift+scroll to pan horizontally. Native non-passive listener so preventDefault works.
+  useEffect(() => {
+    const pane = imgPaneRef.current;
+    if (!pane) return;
+    const onWheel = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        setZoom((z) => Math.min(4, Math.max(0.5, +(z * Math.exp(-e.deltaY * 0.0015)).toFixed(3))));
+      } else if (e.shiftKey) {
+        e.preventDefault();
+        pane.scrollLeft += e.deltaY || e.deltaX;
+      }
+    };
+    pane.addEventListener("wheel", onWheel, { passive: false });
+    return () => pane.removeEventListener("wheel", onWheel);
+  }, [preview, showOriginal, step]);
+
   // Scroll the active transaction's location into view on the statement image
   useEffect(() => {
     if (activeRow == null || !preview) return;
@@ -462,7 +480,7 @@ export default function ImportPage() {
             </details>
           )}
 
-          {/* Toggle + zoom controls */}
+          {/* Toggle + comparison controls (zoom lives on the statement pane itself) */}
           {canShowOriginal && (
             <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10, marginBottom: 10 }}>
               {splitView && (
@@ -479,15 +497,9 @@ export default function ImportPage() {
                   {autoHighlight && preview.positionAccuracy === "approximate" && (
                     <span style={{ fontSize: 11, color: "#d99a3a" }} title="Positions are estimated by the AI from the image, not read from a text layer — they may be off.">≈ positions are approximate</span>
                   )}
-                  <div style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: "auto" }}>
-                    <button onClick={() => setZoom((z) => Math.max(0.5, +(z - 0.25).toFixed(2)))} style={zoomBtn} title="Zoom out">−</button>
-                    <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-ibm-mono)", minWidth: 40, textAlign: "center" }}>{Math.round(zoom * 100)}%</span>
-                    <button onClick={() => setZoom((z) => Math.min(3, +(z + 0.25).toFixed(2)))} style={zoomBtn} title="Zoom in">+</button>
-                    {zoom !== 1 && <button onClick={() => setZoom(1)} style={{ ...zoomBtn, width: "auto", padding: "0 8px", fontSize: 11 }} title="Reset zoom">Reset</button>}
-                  </div>
                 </>
               )}
-              <button onClick={() => setShowOriginal((s) => !s)} style={ghostBtn}>
+              <button onClick={() => setShowOriginal((s) => !s)} style={{ ...ghostBtn, marginLeft: "auto" }}>
                 {showOriginal ? "Hide comparison" : "Compare side by side ⇄"}
               </button>
             </div>
@@ -502,8 +514,17 @@ export default function ImportPage() {
             {/* Rendered document pane */}
             {splitView && (
               <div style={{ background: "var(--bg-2)", border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden", position: "sticky", top: 0 }}>
-                <div style={{ padding: "10px 16px", borderBottom: "1px solid var(--border)", fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  Statement — {file?.name}
+                <div style={{ padding: "8px 12px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 10 }}>
+                  <span style={{ flex: 1, minWidth: 0, fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    Statement — {file?.name}
+                  </span>
+                  {/* Zoom controls — + is anchored rightmost so Reset appearing never shifts it */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 3, flexShrink: 0 }}>
+                    {zoom !== 1 && <button onClick={() => setZoom(1)} style={{ ...zoomBtn, width: "auto", height: 22, padding: "0 7px", fontSize: 11 }} title="Reset zoom (100%)">Reset</button>}
+                    <button onClick={() => setZoom((z) => Math.max(0.5, +(z - 0.25).toFixed(2)))} style={{ ...zoomBtn, width: 22, height: 22 }} title="Zoom out">−</button>
+                    <span title="⌘/Ctrl + scroll to zoom · Shift + scroll to pan" style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-ibm-mono)", minWidth: 38, textAlign: "center", cursor: "help" }}>{Math.round(zoom * 100)}%</span>
+                    <button onClick={() => setZoom((z) => Math.min(4, +(z + 0.25).toFixed(2)))} style={{ ...zoomBtn, width: 22, height: 22 }} title="Zoom in">+</button>
+                  </div>
                 </div>
                 <div ref={imgPaneRef} style={{ maxHeight: 600, overflow: "auto", background: "#fff" }}>
                   <div style={{ width: `${zoom * 100}%`, transition: "width 0.15s" }}>
