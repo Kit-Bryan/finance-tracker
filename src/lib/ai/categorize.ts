@@ -28,11 +28,16 @@ export async function bulkCategorize(
     ? `\nUser's confirmed categorizations (use these for consistency):\n${examples.map((e) => `  "${e.merchant}" → ${e.categoryName}`).join("\n")}\n`
     : "";
 
+  const userName = process.env.USER_NAME?.trim();
+  const userBlock = userName
+    ? `\nThe account holder is "${userName}". When a transaction's counterparty is this person (allowing for abbreviated or reordered names), it is the user moving money between their OWN accounts/wallets — categorize as "Transfer" (neither income nor spending). A transfer to or from a DIFFERENT person's name may be a real income or expense — judge by context, do NOT assume it's a transfer.\n`
+    : "";
+
   const prompt = `You are categorizing Malaysian bank transactions. For each transaction, identify the real merchant name and pick the best category.
 
 Available categories (use EXACTLY one of these names):
 ${categoryNames.join(", ")}
-${examplesBlock}
+${examplesBlock}${userBlock}
 Transactions (JSON array):
 ${JSON.stringify(transactions, null, 2)}
 
