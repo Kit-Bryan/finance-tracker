@@ -273,6 +273,11 @@ export default function ImportPage() {
           <button onClick={handleParse} disabled={!file || parsing} style={primaryBtn(!file || parsing)}>
             {parsing ? "Detecting & parsing…" : "Parse File →"}
           </button>
+          {!file && !parsing && (
+            <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 10 }}>
+              Drop or select a file above to continue.
+            </p>
+          )}
         </div>
       )}
 
