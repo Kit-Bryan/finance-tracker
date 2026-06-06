@@ -31,6 +31,7 @@ interface Transaction {
   accountName: string | null;
   categorySource: string | null;
   hidden: boolean;
+  reimbursementForId: number | null;
   notes: string | null;
 }
 
@@ -96,6 +97,7 @@ export default function TransactionsContent() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Transaction | null>(null);
+  const [reimburseFor, setReimburseFor] = useState<Transaction | null>(null);
   const [bulkResult, setBulkResult] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [agentOpen, setAgentOpen] = useState(false);
@@ -291,6 +293,20 @@ export default function TransactionsContent() {
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['transactions'] });
+    },
+  });
+
+  const reimburseMutation = useMutation({
+    mutationFn: ({ repaymentId, expenseId }: { repaymentId: number; expenseId: number | null }) =>
+      fetch(`/api/transactions/${repaymentId}/reimburse`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ expenseId }),
+      }).then((r) => r.json()),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['transactions'] });
+      queryClient.invalidateQueries({ queryKey: ['review-queue'] });
+      queryClient.invalidateQueries({ queryKey: ['insights'] });
     },
   });
 
@@ -649,14 +665,16 @@ export default function TransactionsContent() {
                           </div>
                         </td>
 
-                        {/* Category badge */}
+                        {/* Category badge (or repayment indicator) */}
                         <td style={{ padding: "10px 16px" }}>
-                          {tx.categoryName
-                            ? <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 3, background: (tx.categoryColor ?? "#888") + "22", color: tx.categoryColor ?? "var(--text-muted)", whiteSpace: "nowrap" }}>
-                                {tx.parentCategoryName && <span style={{ opacity: 0.6 }}>{tx.parentCategoryName} › </span>}
-                                {tx.categoryName}
-                              </span>
-                            : <span style={{ fontSize: 11, color: "var(--text-dim)" }}>—</span>}
+                          {tx.reimbursementForId
+                            ? <span title="Linked as a repayment — netted into the original expense, not counted on its own" style={{ fontSize: 11, padding: "2px 8px", borderRadius: 3, background: "var(--accent-dim)", color: "var(--accent)", whiteSpace: "nowrap" }}>↩ Repayment</span>
+                            : tx.categoryName
+                              ? <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 3, background: (tx.categoryColor ?? "#888") + "22", color: tx.categoryColor ?? "var(--text-muted)", whiteSpace: "nowrap" }}>
+                                  {tx.parentCategoryName && <span style={{ opacity: 0.6 }}>{tx.parentCategoryName} › </span>}
+                                  {tx.categoryName}
+                                </span>
+                              : <span style={{ fontSize: 11, color: "var(--text-dim)" }}>—</span>}
                         </td>
 
                         {/* Account */}
@@ -674,6 +692,7 @@ export default function TransactionsContent() {
                           <div style={{ display: "flex", gap: 4, transition: "opacity 0.15s" }} className="row-actions">
                             <ActionBtn color="var(--accent)" title="Ask AI" onClick={() => { setAgentContext({ id: tx.id, description: tx.description, merchantNormalized: tx.merchantNormalized, amount: tx.amount, postedAt: tx.postedAt, categoryName: tx.categoryName, notes: tx.notes }); setAgentOpen(true); }}>✦</ActionBtn>
                             <ActionBtn color="var(--text-muted)" title="Edit" onClick={() => setEditingId(isEditing ? null : tx.id)}>✎</ActionBtn>
+                            <ActionBtn color={tx.reimbursementForId ? "var(--accent)" : "var(--text-muted)"} title={tx.reimbursementForId ? "Edit repayment link" : "Mark as a repayment for an expense"} onClick={() => setReimburseFor(tx)}>↩</ActionBtn>
                             <ActionBtn color="var(--text-muted)" title={tx.hidden ? "Unhide" : "Hide from list"} disabled={isHiding} onClick={() => toggleHiddenMutation.mutate({ id: tx.id, hidden: !tx.hidden })}>{tx.hidden ? "🚫" : "⊘"}</ActionBtn>
                             <ActionBtn color="var(--expense)" title="Delete" onClick={() => setConfirmDelete(tx)}>✕</ActionBtn>
                           </div>
