@@ -285,7 +285,7 @@ export default function ImportPage() {
   const splitView = showOriginal && canShowOriginal;
 
   return (
-    <div style={{ padding: "32px 36px", maxWidth: splitView ? 1280 : 860, margin: "0 auto", transition: "max-width 0.2s" }}>
+    <div style={{ padding: "32px 36px", maxWidth: splitView ? 1700 : 860, margin: "0 auto", transition: "max-width 0.2s" }}>
       {/* Header */}
       <div className="fade-up fade-up-1" style={{ marginBottom: 32 }}>
         <h1 style={{ fontFamily: "var(--font-syne)", fontSize: 26, fontWeight: 700, letterSpacing: "-0.03em", color: "var(--text)" }}>
@@ -508,7 +508,7 @@ export default function ImportPage() {
           {/* Rendered pages + parsed transactions (side by side when enabled) */}
           <div style={{
             display: splitView ? "grid" : "block",
-            gridTemplateColumns: splitView ? "minmax(0, 1fr) minmax(0, 1fr)" : undefined,
+            gridTemplateColumns: splitView ? "minmax(0, 1.7fr) minmax(360px, 1fr)" : undefined,
             gap: 14, marginBottom: 20, alignItems: "start",
           }}>
             {/* Rendered document pane */}
@@ -526,7 +526,7 @@ export default function ImportPage() {
                     <button onClick={() => setZoom((z) => Math.min(4, +(z + 0.25).toFixed(2)))} style={{ ...zoomBtn, width: 22, height: 22 }} title="Zoom in">+</button>
                   </div>
                 </div>
-                <div ref={imgPaneRef} style={{ maxHeight: 600, overflow: "auto", background: "#fff" }}>
+                <div ref={imgPaneRef} style={{ maxHeight: 700, overflow: "auto", background: "#fff" }}>
                   <div style={{ width: `${zoom * 100}%`, transition: "width 0.15s" }}>
                     {comparisonImages.map((src, i) => {
                       const showBand = !!band && band.page === i;
@@ -572,7 +572,7 @@ export default function ImportPage() {
 
             {/* Parsed transactions table */}
             <div style={{ background: "var(--bg-2)", border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden" }}>
-              <div style={{ maxHeight: splitView ? 600 : 420, overflowY: "auto" }}>
+              <div style={{ maxHeight: splitView ? 700 : 420, overflowY: "auto" }}>
                 <table style={{ width: "100%", borderCollapse: "collapse" }}>
                   <thead style={{ position: "sticky", top: 0, background: "var(--bg-2)", zIndex: 1 }}>
                     <tr style={{ borderBottom: "1px solid var(--border)" }}>
