@@ -1,77 +1,9 @@
-What you’re seeing is basically a “round-trip movement of money” inside Touch ’n Go eWallet’s GO+ system, not extra charges.
+❌ Transactions to IGNORE (GO+ noise)
 
-Let’s break your pattern down:
+Inside Touch 'n Go eWallet GO+, ignore ALL of these:
 
-1. What “GO+ Balance” actually is
-
-GO+ (inside Touch 'n Go eWallet) is a cash management / investment wallet.
-
-So money in GO+ is not your normal eWallet balance — it’s parked in a fund (money market fund) that earns small daily returns.
-
-2. Why you see TWO transactions every time
-Example you showed:
-+MYR 25.00 → Quick Reload Payment (via GO+Balance)
--MYR 25.00 → CELCOM MOBILE SDN BHD
-
-This usually means:
-
-Step A — Money is pulled from GO+
-
-When you pay something (like Celcom bill), the system first:
-
-takes money out of GO+ balance
-
-That shows as:
-
-Quick Reload Payment (via GO+Balance)
-Step B — Immediately used for payment
-
-Then the money is:
-
-sent to the merchant (Celcom)
-or routed via internal settlement
-
-So you see:
-
-Merchant deduction (Celcom / Fund Transfer / etc.)
-3. Why it looks like “double entries”
-
-It’s not double spending. It’s just internal accounting split into two legs:
-
-Step	Meaning
-+ GO+ Quick Reload Payment	Money leaving investment fund into eWallet system
-- Merchant / Transfer	Money leaving to pay the actual bill
-4. Why “Fund Transfer” sometimes appears instead of merchant
-
-Some payments don’t go directly to the merchant system. Instead:
-
-GO+ → eWallet main balance / clearing account
-then → merchant
-
-So it shows up as:
-
+Quick Reload Payment (via GO+ Balance)
 Fund Transfer
-5. Why GO+ is involved at all
-
-Because your settings likely have:
-
-GO+ set as default funding source, or
-“auto top-up from GO+ when paying”
-
-So instead of using your normal eWallet balance, it:
-
-automatically pulls from GO+ first
-
-6. When this is normal vs not normal
-
-✅ Normal:
-
-Quick Reload Payment + matching debit right after
-Same amount both sides
-Happens during bills / QR / transfers
-
-🚨 Not normal (worth checking):
-
-Extra unknown deductions
-GO+ withdrawals you didn’t trigger
-mismatched amounts
+Any entry that is clearly internal GO+ routing / processing
+Any duplicate legs of the same transaction (same amount + same time window + linked to a merchant payment)
+Any “movement steps” that exist only to support a payment (not the final merchant or real counterparty)
