@@ -175,10 +175,36 @@ export default function DashboardPage() {
 
       {/* No data state */}
       {!loading && insights?.summary.txCount === 0 && (
-        <div className="fade-up fade-up-2" style={{ padding: "40px 32px", textAlign: "center", background: "var(--bg-2)", border: "1px solid var(--border)", borderRadius: 8, marginBottom: 24 }}>
-          <div style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 8 }}>No transactions for {monthLabel(month)}</div>
-          <Link href="/import" style={{ fontSize: 13, color: "var(--accent)", textDecoration: "none" }}>Import a statement →</Link>
-        </div>
+        insights?.monthlyTrend.length === 0 ? (
+          // First-time user — no data at all
+          <div className="fade-up fade-up-2" style={{ padding: "56px 32px", textAlign: "center", background: "var(--bg-2)", border: "1px solid var(--border)", borderRadius: 8, marginBottom: 24 }}>
+            <div style={{ fontSize: 22, fontWeight: 700, fontFamily: "var(--font-syne)", letterSpacing: "-0.02em", color: "var(--text)", marginBottom: 8 }}>Welcome to Finance Tracker</div>
+            <div style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 28, maxWidth: 360, margin: "0 auto 28px" }}>
+              Import your first bank statement to start tracking spending, spotting patterns, and getting AI-powered insights.
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10, marginBottom: 28 }}>
+              {[
+                "Upload a CSV, PDF, or screenshot of any bank statement",
+                "Transactions are auto-categorized using AI",
+                "Ask the agent to find, edit, or explain any transaction",
+              ].map((step, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13, color: "var(--text-muted)" }}>
+                  <span style={{ width: 20, height: 20, borderRadius: "50%", background: "var(--accent)", color: "#fff", fontSize: 11, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{i + 1}</span>
+                  {step}
+                </div>
+              ))}
+            </div>
+            <Link href="/import" style={{ display: "inline-block", padding: "9px 20px", background: "var(--accent)", color: "#fff", borderRadius: 6, fontSize: 13, fontWeight: 500, textDecoration: "none" }}>
+              Import your first statement →
+            </Link>
+          </div>
+        ) : (
+          // Month with no data
+          <div className="fade-up fade-up-2" style={{ padding: "40px 32px", textAlign: "center", background: "var(--bg-2)", border: "1px solid var(--border)", borderRadius: 8, marginBottom: 24 }}>
+            <div style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 8 }}>No transactions for {monthLabel(month)}</div>
+            <Link href="/import" style={{ fontSize: 13, color: "var(--accent)", textDecoration: "none" }}>Import a statement →</Link>
+          </div>
+        )
       )}
 
       {/* Summary cards */}
