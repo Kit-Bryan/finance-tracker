@@ -2,7 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { transactions, categories, accounts } from "@/db/schema";
 import { eq, and, gte, lte, sql, desc, isNull, or, ilike } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { computeFingerprint } from "@/lib/parsers/fingerprint";
+
+// Self-join alias to resolve a category's parent name
+const parentCat = alias(categories, "parent_cat");
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -46,6 +50,7 @@ export async function GET(req: NextRequest) {
       categoryId: transactions.categoryId,
       categoryName: categories.name,
       categoryColor: categories.color,
+      parentCategoryName: parentCat.name,
       accountId: transactions.accountId,
       accountName: accounts.name,
       isTransfer: transactions.isTransfer,
@@ -55,6 +60,7 @@ export async function GET(req: NextRequest) {
     })
     .from(transactions)
     .leftJoin(categories, eq(transactions.categoryId, categories.id))
+    .leftJoin(parentCat, eq(categories.parentId, parentCat.id))
     .leftJoin(accounts, eq(transactions.accountId, accounts.id))
     .where(conditions.length > 0 ? and(...conditions) : undefined)
     .orderBy(desc(transactions.postedAt))

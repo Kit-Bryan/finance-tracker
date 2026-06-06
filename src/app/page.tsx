@@ -34,6 +34,7 @@ interface Transaction {
   amount: string;
   categoryName: string | null;
   categoryColor: string | null;
+  parentCategoryName: string | null;
   accountName: string | null;
   notes: string | null;
 }
@@ -299,7 +300,10 @@ export default function DashboardPage() {
                       </td>
                       <td style={{ padding: "12px 24px" }}>
                         {tx.categoryName
-                          ? <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 3, background: (tx.categoryColor ?? "#888") + "22", color: tx.categoryColor ?? "var(--text-muted)" }}>{tx.categoryName}</span>
+                          ? <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 3, background: (tx.categoryColor ?? "#888") + "22", color: tx.categoryColor ?? "var(--text-muted)", whiteSpace: "nowrap" }}>
+                              {tx.parentCategoryName && <span style={{ opacity: 0.6 }}>{tx.parentCategoryName} › </span>}
+                              {tx.categoryName}
+                            </span>
                           : <span style={{ fontSize: 11, color: "var(--text-dim)" }}>—</span>}
                       </td>
                       <td style={{ padding: "12px 24px", fontSize: 12, color: "var(--text-muted)", whiteSpace: "nowrap" }}>{tx.accountName ?? "—"}</td>

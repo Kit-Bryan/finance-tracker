@@ -20,6 +20,7 @@ interface Transaction {
   categoryId: number | null;
   categoryName: string | null;
   categoryColor: string | null;
+  parentCategoryName: string | null;
   accountId: number;
   accountName: string | null;
   categorySource: string | null;
@@ -408,7 +409,10 @@ export default function TransactionsContent() {
                         {/* Category badge */}
                         <td style={{ padding: "10px 16px" }}>
                           {tx.categoryName
-                            ? <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 3, background: (tx.categoryColor ?? "#888") + "22", color: tx.categoryColor ?? "var(--text-muted)" }}>{tx.categoryName}</span>
+                            ? <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 3, background: (tx.categoryColor ?? "#888") + "22", color: tx.categoryColor ?? "var(--text-muted)", whiteSpace: "nowrap" }}>
+                                {tx.parentCategoryName && <span style={{ opacity: 0.6 }}>{tx.parentCategoryName} › </span>}
+                                {tx.categoryName}
+                              </span>
                             : <span style={{ fontSize: 11, color: "var(--text-dim)" }}>—</span>}
                         </td>
 
