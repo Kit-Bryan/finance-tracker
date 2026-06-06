@@ -63,6 +63,9 @@ const selectStyle: React.CSSProperties = {
 export default function TransactionsContent() {
   const searchParams = useSearchParams();
   const filterParam = searchParams.get("filter");
+  const fromParam = searchParams.get("from");
+  const toParam = searchParams.get("to");
+  const categoryIdParam = searchParams.get("categoryId");
 
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -74,10 +77,10 @@ export default function TransactionsContent() {
   const [tab, setTab] = useState<"list" | "history" | "trash">("list");
 
   const [filters, setFilters] = useState({
-    from: startOfMonth(),
-    to: today(),
+    from: fromParam || startOfMonth(),
+    to: toParam || today(),
     accountId: "",
-    categoryId: filterParam === "uncategorized" ? "none" : "",
+    categoryId: filterParam === "uncategorized" ? "none" : (categoryIdParam || ""),
     search: "",
   });
   // Separate typed value so we can debounce before triggering a fetch

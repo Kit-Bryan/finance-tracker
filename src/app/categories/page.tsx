@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { formatCurrency } from "@/lib/format";
 
 interface Cat {
@@ -25,6 +26,7 @@ type PickerMode =
   | { kind: "resolve"; source: Cat; count: number };
 
 export default function CategoriesPage() {
+  const router = useRouter();
   const [cats, setCats] = useState<Cat[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -163,7 +165,7 @@ export default function CategoriesPage() {
                     )}
                     {!isOpen && roll.kidCount > 0 && <span style={{ fontSize: 11, color: "var(--text-dim)", marginLeft: 8 }}>{roll.kidCount} sub</span>}
                   </div>
-                  <Stats count={roll.count} total={roll.total} muted={!isOpen} />
+                  <Stats count={roll.count} total={roll.total} muted={!isOpen} onNavigate={() => router.push(`/transactions?categoryId=${parent.id}`)} />
                   <div className="cat-actions" style={{ display: "flex", gap: 4 }}>
                     <RowBtn onClick={() => { setCreating({ parentId: parent.id }); setNewName(""); setExpanded((p) => new Set(p).add(parent.id)); }} title="Add subcategory">+ sub</RowBtn>
                     <RowBtn onClick={() => setPicker({ kind: "merge", source: parent })} title="Merge into another category">merge</RowBtn>
@@ -182,7 +184,7 @@ export default function CategoriesPage() {
                         <span onClick={() => { setEditingId(kid.id); setDraftName(kid.name); }} style={{ fontSize: 13, color: "var(--text)", cursor: "text" }}>{kid.name}</span>
                       )}
                     </div>
-                    <Stats count={kid.txCount} total={kid.total} />
+                    <Stats count={kid.txCount} total={kid.total} onNavigate={() => router.push(`/transactions?categoryId=${kid.id}`)} />
                     <div className="cat-actions" style={{ display: "flex", gap: 4 }}>
                       <RowBtn onClick={() => setPicker({ kind: "move", cat: kid })} title="Move to another parent">move</RowBtn>
                       <RowBtn onClick={() => makeTopLevel(kid)} title="Promote to top-level">promote</RowBtn>
@@ -224,10 +226,24 @@ export default function CategoriesPage() {
   );
 }
 
-function Stats({ count, total, muted }: { count: number; total: number; muted?: boolean }) {
+function Stats({ count, total, muted, onNavigate }: { count: number; total: number; muted?: boolean; onNavigate?: () => void }) {
+  const clickable = count > 0 && !!onNavigate;
   return (
-    <div style={{ textAlign: "right", minWidth: 96 }}>
-      <div style={{ fontSize: 12, color: muted ? "var(--text-dim)" : "var(--text-muted)", fontFamily: "var(--font-ibm-mono)" }}>{count} tx</div>
+    <div
+      onClick={(e) => { if (clickable) { e.stopPropagation(); onNavigate!(); } }}
+      title={clickable ? "View in transactions" : undefined}
+      style={{
+        textAlign: "right", minWidth: 96,
+        cursor: clickable ? "pointer" : "default",
+        borderRadius: 5, padding: "2px 6px",
+        transition: "background 0.1s",
+      }}
+      onMouseEnter={(e) => { if (clickable) e.currentTarget.style.background = "var(--bg-3)"; }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+    >
+      <div style={{ fontSize: 12, color: muted ? "var(--text-dim)" : "var(--text-muted)", fontFamily: "var(--font-ibm-mono)" }}>
+        {count} tx{clickable ? " ↗" : ""}
+      </div>
       {count > 0 && (
         <div style={{ fontSize: 12, fontFamily: "var(--font-ibm-mono)", color: total < 0 ? "var(--expense)" : "var(--income)" }}>{formatCurrency(total, "MYR")}</div>
       )}

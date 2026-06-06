@@ -288,7 +288,7 @@ export default function DashboardPage() {
         <div style={{ background: "var(--bg-2)", border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden" }}>
           <div style={{ padding: "14px 24px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <span style={{ fontSize: 11, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--text-muted)" }}>Recent Transactions</span>
-            <Link href="/transactions" style={{ fontSize: 12, color: "var(--accent)", textDecoration: "none" }}>View all →</Link>
+            <Link href={`/transactions?from=${from}&to=${to}`} style={{ fontSize: 12, color: "var(--accent)", textDecoration: "none" }}>View all →</Link>
           </div>
           {loading ? (
             <div style={{ padding: 24 }}>{[...Array(5)].map((_, i) => <div key={i} className="skeleton" style={{ height: 44, marginBottom: 8 }} />)}</div>
