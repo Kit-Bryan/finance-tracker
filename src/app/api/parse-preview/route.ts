@@ -49,6 +49,7 @@ export interface PreviewResponse {
   truncated?: boolean;       // true if the document was too large to fully scan
   truncationNote?: string;   // human-readable explanation
   pageImages?: string[];     // rasterized PDF pages (base64 PNG data URLs) for the side-by-side comparison
+  positionAccuracy?: "exact" | "approximate" | "none"; // how row highlight positions were derived
 }
 
 function mimeFromName(name: string): string {
@@ -168,6 +169,8 @@ export async function POST(req: NextRequest) {
       accountIsNew,
       totalRows: rows.length,
       errorRows: 0,
+      // Image uploads only have vision-estimated positions
+      positionAccuracy: rows.some((r) => r.yPercent != null) ? "approximate" : "none",
     } satisfies PreviewResponse);
   }
 
@@ -245,10 +248,12 @@ export async function POST(req: NextRequest) {
     // coordinate-guessing — for the stragglers the matcher couldn't place.
     // (Scanned PDFs already carry vision yPercent; their text layer is empty so
     // extractPdfTextBoxes returns [] and this block is a no-op.)
+    let usedTextLayer = false;
     if (rows.some((r) => r.yPercent == null)) {
       try {
         const bboxPages = await extractPdfTextBoxes(buffer);
         if (bboxPages.length > 0) {
+          usedTextLayer = true;
           const { positions, unmatchedIndexes, lines } = matchTransactionsToLines(
             rows.map((r) => ({ amount: r.amount })),
             bboxPages,
@@ -277,6 +282,11 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Exact when derived from the PDF text layer; approximate when only the vision
+    // model supplied positions (scanned PDFs); none if we have nothing.
+    const positionAccuracy: "exact" | "approximate" | "none" =
+      usedTextLayer ? "exact" : rows.some((r) => r.yPercent != null) ? "approximate" : "none";
+
     return NextResponse.json({
       type: "pdf",
       rows,
@@ -288,6 +298,7 @@ export async function POST(req: NextRequest) {
       truncated,
       truncationNote,
       pageImages,
+      positionAccuracy,
     } satisfies PreviewResponse);
   }
 
