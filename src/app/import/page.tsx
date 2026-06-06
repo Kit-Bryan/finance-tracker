@@ -351,7 +351,7 @@ export default function ImportPage() {
                     return (
                       <tr key={i} style={{ borderBottom: "1px solid var(--border)", background: hasError ? "var(--expense-dim)" : "transparent" }}>
                         <td style={{ padding: "9px 20px", fontSize: 12, color: "var(--text-muted)", fontFamily: "var(--font-ibm-mono)", whiteSpace: "nowrap" }}>
-                          {row.date || "—"}
+                          {row.date || "—"}{row.time ? ` ${row.time}` : ""}
                         </td>
                         <td style={{ padding: "9px 20px", fontSize: 13, color: hasError ? "var(--expense)" : "var(--text)", maxWidth: 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                           {hasError ? `⚠ ${row.parseError}` : row.description}

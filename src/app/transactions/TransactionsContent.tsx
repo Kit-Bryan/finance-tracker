@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useSearchParams } from "next/navigation";
-import { formatCurrency, startOfMonth, today } from "@/lib/format";
+import { formatCurrency, startOfMonth, today, formatTxDate, formatTxTime } from "@/lib/format";
 import ReviewQueue from "@/components/ReviewQueue";
 import AgentChat, { ContextTransaction } from "@/components/AgentChat";
 import CategoryCombobox, { CategoryValue } from "@/components/CategoryCombobox";
@@ -375,7 +375,10 @@ export default function TransactionsContent() {
                       >
                         {/* Date */}
                         <td style={{ padding: "10px 14px", fontSize: 12, color: "var(--text-muted)", fontFamily: "var(--font-ibm-mono)", whiteSpace: "nowrap" }}>
-                          {new Date(tx.postedAt).toLocaleDateString("en-MY", { day: "numeric", month: "short", year: "numeric" })}
+                          {formatTxDate(tx.postedAt)}
+                          {formatTxTime(tx.postedAt) && (
+                            <div style={{ fontSize: 10, color: "var(--text-dim)" }}>{formatTxTime(tx.postedAt)}</div>
+                          )}
                         </td>
 
                         {/* Merchant / Description */}

@@ -5,7 +5,7 @@ import Link from "next/link";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
 } from "recharts";
-import { formatCurrency, formatMonth } from "@/lib/format";
+import { formatCurrency, formatMonth, formatTxDate, formatTxTime } from "@/lib/format";
 import NeedsAttention from "@/components/NeedsAttention";
 
 interface InsightsData {
@@ -288,7 +288,10 @@ export default function DashboardPage() {
                       onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-3)")}
                       onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
                       <td style={{ padding: "12px 24px", fontSize: 12, color: "var(--text-muted)", fontFamily: "var(--font-ibm-mono)", whiteSpace: "nowrap" }}>
-                        {new Date(tx.postedAt).toLocaleDateString("en-MY", { day: "numeric", month: "short" })}
+                        {formatTxDate(tx.postedAt)}
+                        {formatTxTime(tx.postedAt) && (
+                          <div style={{ fontSize: 10, color: "var(--text-dim)" }}>{formatTxTime(tx.postedAt)}</div>
+                        )}
                       </td>
                       <td style={{ padding: "12px 24px", maxWidth: 260 }}>
                         <div style={{ fontSize: 13, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{displayName}</div>
