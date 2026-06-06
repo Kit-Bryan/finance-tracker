@@ -14,6 +14,7 @@ import { categories } from "@/db/schema";
 import { PreviewRow } from "@/app/api/parse-preview/route";
 import { runAllDetectors } from "@/lib/flags/detect";
 import { combinePostedAt } from "@/lib/format";
+import { logger } from "@/lib/logger";
 
 interface ConfirmBody {
   accountId: number;
@@ -29,6 +30,7 @@ interface ConfirmBody {
 }
 
 export async function POST(req: NextRequest) {
+  const log = logger.child({ route: "import-confirm" });
   const body: ConfirmBody = await req.json();
   const { accountId, filename, rows, saveProfile, profileId } = body;
 
@@ -158,9 +160,11 @@ export async function POST(req: NextRequest) {
   // Proactively scan the new data for reimbursements + low-confidence categorizations
   try {
     await runAllDetectors();
-  } catch (e) {
-    console.error("Flag detection failed:", e);
+  } catch (err) {
+    log.error({ err, batchId: batch.id }, "flag detection failed after import");
   }
+
+  log.info({ batchId: batch.id, accountId, total: rows.length, importedRows, skipped: skippedDetails.length, errorRows }, "import complete");
 
   return NextResponse.json({
     batchId: batch.id,

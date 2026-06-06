@@ -1,5 +1,8 @@
 import { getAIClient, DEFAULT_MODEL } from "./client";
 import { ProfileConfig } from "@/lib/parsers/types";
+import { logger } from "@/lib/logger";
+
+const log = logger.child({ module: "ai/parse" });
 
 export interface ParsedTransaction {
   date: string;       // YYYY-MM-DD
@@ -138,7 +141,9 @@ function parseStatementResponse(text: string): PdfParseResult {
         accountName: parsed.account?.accountName ?? parsed.account?.bank ?? "My Account",
       },
     };
-  } catch {
+  } catch (err) {
+    // Silent-failure seam: the model returned non-JSON. Surface it instead of returning [].
+    log.warn({ err, sample: text.slice(0, 200) }, "statement response was not valid JSON — returning empty result");
     return {
       transactions: [],
       account: { bank: "Unknown Bank", accountType: "unknown", accountNumber: "", accountName: "My Account" },
@@ -167,13 +172,22 @@ ${truncatedText}
 
 ${STATEMENT_JSON_SPEC}`;
 
-  const resp = await ai.chat.completions.create({
-    model: DEFAULT_MODEL,
-    messages: [{ role: "user", content: prompt }],
-    temperature: 0,
-  });
+  const t0 = Date.now();
+  let resp;
+  try {
+    resp = await ai.chat.completions.create({
+      model: DEFAULT_MODEL,
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0,
+    });
+  } catch (err) {
+    log.error({ err, model: DEFAULT_MODEL, chars: truncatedText.length }, "PDF statement LLM call failed");
+    throw err;
+  }
 
-  return { ...parseStatementResponse(resp.choices[0]?.message?.content ?? ""), truncated: isTruncated };
+  const result = { ...parseStatementResponse(resp.choices[0]?.message?.content ?? ""), truncated: isTruncated };
+  log.info({ model: DEFAULT_MODEL, ms: Date.now() - t0, transactions: result.transactions.length, truncated: isTruncated }, "parsed PDF statement (text)");
+  return result;
 }
 
 // Ask the LLM (vision) to parse bank-statement IMAGES (screenshots / photos / scans) into transactions
@@ -192,11 +206,20 @@ ${STATEMENT_JSON_SPEC}`;
     ...imageDataUrls.map((url) => ({ type: "image_url", image_url: { url } })),
   ];
 
-  const resp = await ai.chat.completions.create({
-    model: DEFAULT_MODEL,
-    messages: [{ role: "user", content }],
-    temperature: 0,
-  });
+  const t0 = Date.now();
+  let resp;
+  try {
+    resp = await ai.chat.completions.create({
+      model: DEFAULT_MODEL,
+      messages: [{ role: "user", content }],
+      temperature: 0,
+    });
+  } catch (err) {
+    log.error({ err, model: DEFAULT_MODEL, images: imageDataUrls.length }, "image statement (vision) LLM call failed");
+    throw err;
+  }
 
-  return parseStatementResponse(resp.choices[0]?.message?.content ?? "");
+  const result = parseStatementResponse(resp.choices[0]?.message?.content ?? "");
+  log.info({ model: DEFAULT_MODEL, ms: Date.now() - t0, images: imageDataUrls.length, transactions: result.transactions.length }, "parsed image statement (vision)");
+  return result;
 }

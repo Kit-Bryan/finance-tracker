@@ -3,6 +3,9 @@ import { eq } from "drizzle-orm";
 import { runAgentTurn, AgentMessage, ContextTransaction } from "@/lib/ai/agent";
 import { db } from "@/db";
 import { chatSessions, chatMessages } from "@/db/schema";
+import { logger } from "@/lib/logger";
+
+const log = logger.child({ route: "agent/chat" });
 
 export async function POST(req: NextRequest) {
   const { message, history, sessionId, contextTransaction } = await req.json() as {
@@ -44,6 +47,7 @@ export async function POST(req: NextRequest) {
     content: message,
   });
 
+  const t0 = Date.now();
   try {
     const result = await runAgentTurn(history ?? [], message, contextTransaction);
 
@@ -56,8 +60,10 @@ export async function POST(req: NextRequest) {
       pendingAction: result.pendingConfirmation ?? null,
     });
 
+    log.info({ sessionId: resolvedSessionId, ms: Date.now() - t0, tools: result.toolResults?.map((t) => t.toolName) ?? [], pending: result.pendingConfirmation?.type ?? null }, "agent turn complete");
     return NextResponse.json({ ...result, sessionId: resolvedSessionId });
   } catch (e) {
+    log.error({ err: e, sessionId: resolvedSessionId }, "agent turn failed");
     return NextResponse.json({ error: String(e) }, { status: 500 });
   }
 }

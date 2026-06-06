@@ -1,5 +1,8 @@
 import { getAIClient, DEFAULT_MODEL } from "./client";
 import { getConfirmedExamples, CategoryExample } from "./examples";
+import { logger } from "@/lib/logger";
+
+const log = logger.child({ module: "ai/categorize" });
 
 export interface CategorizationInput {
   id: number;
@@ -69,19 +72,29 @@ Rules:
 Return ONLY a JSON array (no markdown):
 [{"id": 1, "merchantName": "...", "categoryName": "...", "confidence": 0.95, "note": "..."}]`;
 
-  const resp = await ai.chat.completions.create({
-    model: DEFAULT_MODEL,
-    messages: [{ role: "user", content: prompt }],
-    temperature: 0,
-  });
+  const t0 = Date.now();
+  let resp;
+  try {
+    resp = await ai.chat.completions.create({
+      model: DEFAULT_MODEL,
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0,
+    });
+  } catch (err) {
+    log.error({ err, model: DEFAULT_MODEL, count: transactions.length }, "bulk categorize LLM call failed");
+    return [];
+  }
 
   const text = resp.choices[0]?.message?.content ?? "[]";
   const json = text.replace(/```(?:json)?/g, "").trim();
 
   try {
     const results = JSON.parse(json);
-    if (!Array.isArray(results)) return [];
-    return results
+    if (!Array.isArray(results)) {
+      log.warn({ count: transactions.length }, "bulk categorize response was not a JSON array — skipping");
+      return [];
+    }
+    const mapped = results
       .filter(
         (r: any) =>
           typeof r.id === "number" &&
@@ -89,7 +102,10 @@ Return ONLY a JSON array (no markdown):
           typeof r.categoryName === "string"
       )
       .map((r: any) => ({ ...r, note: r.note ?? "" }));
-  } catch {
+    log.info({ model: DEFAULT_MODEL, ms: Date.now() - t0, input: transactions.length, categorized: mapped.length }, "bulk categorized");
+    return mapped;
+  } catch (err) {
+    log.warn({ err, sample: text.slice(0, 200) }, "bulk categorize response was not valid JSON — skipping");
     return [];
   }
 }

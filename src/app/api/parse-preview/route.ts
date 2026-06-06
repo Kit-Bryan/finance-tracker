@@ -11,6 +11,9 @@ import { ProfileConfig } from "@/lib/parsers/types";
 import { computeFingerprint } from "@/lib/parsers/fingerprint";
 import { db } from "@/db";
 import { importProfiles, accounts } from "@/db/schema";
+import { logger } from "@/lib/logger";
+
+const log = logger.child({ route: "parse-preview" });
 
 export interface PreviewRow {
   date: string;
@@ -134,6 +137,7 @@ export async function POST(req: NextRequest) {
     try {
       result = await parseImageStatement([dataUrl]);
     } catch (e) {
+      log.error({ err: e, filename: file.name }, "image parsing failed");
       return NextResponse.json({ error: `AI image parsing failed: ${e}` }, { status: 500 });
     }
 
@@ -194,6 +198,7 @@ export async function POST(req: NextRequest) {
         if (r.truncated) { truncated = true; truncationNote = `Only the first ${r.images.length} of ${r.totalPages} pages were scanned — some transactions may be missing.`; }
       }
     } catch (e) {
+      log.error({ err: e, filename: file.name, hasTextLayer }, "PDF parsing failed");
       const hint = hasTextLayer
         ? `AI parsing failed: ${e}`
         : `This PDF has no text layer (likely scanned) and the PDF renderer is unavailable: ${e}`;
@@ -259,6 +264,7 @@ export async function POST(req: NextRequest) {
       detectedAccount = suggestion.account;
       suggestedProfile = { ...suggestion.config, _name: suggestion.account.accountName };
     } catch (e) {
+      log.error({ err: e, filename: file.name }, "CSV profile suggestion failed");
       return NextResponse.json({ error: `Profile suggestion failed: ${e}` }, { status: 500 });
     }
   }
