@@ -901,6 +901,16 @@ export default function TransactionsContent() {
         />
       )}
 
+      {/* ── REIMBURSEMENT PICKER ── */}
+      {reimburseFor && (
+        <ReimbursePicker
+          repayment={reimburseFor}
+          busy={reimburseMutation.isPending}
+          onPick={(expenseId) => { reimburseMutation.mutate({ repaymentId: reimburseFor.id, expenseId }); setReimburseFor(null); }}
+          onClose={() => setReimburseFor(null)}
+        />
+      )}
+
       <style>{`
         .row-actions { opacity: 0.25; }
         tr:hover .row-actions { opacity: 1; }
