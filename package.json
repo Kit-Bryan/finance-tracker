@@ -17,6 +17,7 @@
     "db:seed": "tsx src/db/seed.ts"
   },
   "dependencies": {
+    "@tanstack/react-query": "^5.101.0",
     "csv-parse": "^6.2.1",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
