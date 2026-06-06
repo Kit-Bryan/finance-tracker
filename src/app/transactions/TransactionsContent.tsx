@@ -143,6 +143,18 @@ export default function TransactionsContent() {
     }
   }
 
+  // Cmd+K / Ctrl+K → open agent chat
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault();
+        setAgentOpen(true);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+
   const fetchBatches = async () => {
     const data = await fetch("/api/import-batches").then((r) => r.json());
     setBatches(data);
