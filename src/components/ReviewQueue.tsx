@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { formatCurrency } from "@/lib/format";
 import CategoryCombobox, { Category, CategoryValue } from "./CategoryCombobox";
+import ReimbursePicker from "./ReimbursePicker";
 
 interface FlaggedTx {
   id: number;
@@ -52,6 +53,8 @@ export default function ReviewQueue({ categories, onResolved, onCategoryCreated 
   const [notes, setNotes] = useState<Record<number, string>>({});
   const [aiSuggestions, setAiSuggestions] = useState<Record<number, AISuggestion>>({});
   const [suggesting, setSuggesting] = useState<Record<number, boolean>>({});
+  const [reimburseFor, setReimburseFor] = useState<FlaggedTx | null>(null);
+  const [linking, setLinking] = useState(false);
 
   const fetchQueue = async () => {
     const data = await fetch("/api/review-queue").then((r) => r.json());
@@ -125,6 +128,22 @@ export default function ReviewQueue({ categories, onResolved, onCategoryCreated 
     for (const tx of toAccept) {
       await resolve(tx.id);
     }
+  }
+
+  async function linkRepayment(expenseId: number | null) {
+    if (!reimburseFor) return;
+    setLinking(true);
+    const txId = reimburseFor.id;
+    await fetch(`/api/transactions/${txId}/reimburse`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ expenseId }),
+    });
+    setLinking(false);
+    setReimburseFor(null);
+    // Linked repayments drop out of the review queue
+    if (expenseId != null) setItems((prev) => prev.filter((t) => t.id !== txId));
+    onResolved();
   }
 
   if (loading || items.length === 0) return null;
@@ -307,6 +326,18 @@ export default function ReviewQueue({ categories, onResolved, onCategoryCreated 
                       {saving === tx.id ? "…" : "Confirm"}
                     </button>
                     <button
+                      onClick={() => setReimburseFor(tx)}
+                      disabled={saving === tx.id}
+                      title="This is a repayment for an expense — link it instead of categorizing"
+                      style={{
+                        padding: "5px 12px", borderRadius: 5,
+                        border: "1px solid var(--border-2)", background: "transparent",
+                        color: "var(--text-muted)", fontSize: 12, cursor: "pointer",
+                      }}
+                    >
+                      ↩ Repayment
+                    </button>
+                    <button
                       onClick={() => resolve(tx.id, true)}
                       disabled={saving === tx.id}
                       style={{
@@ -342,6 +373,15 @@ export default function ReviewQueue({ categories, onResolved, onCategoryCreated 
             </div>
           )}
         </div>
+      )}
+
+      {reimburseFor && (
+        <ReimbursePicker
+          repayment={reimburseFor}
+          busy={linking}
+          onPick={linkRepayment}
+          onClose={() => setReimburseFor(null)}
+        />
       )}
     </div>
   );
