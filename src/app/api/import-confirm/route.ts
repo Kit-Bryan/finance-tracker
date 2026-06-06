@@ -7,7 +7,7 @@ import {
   transactions,
   transactionsStaging,
 } from "@/db/schema";
-import { categorizeByRules } from "@/lib/categorizer/rules";
+import { categorizeByRules, isGoPlusNoise } from "@/lib/categorizer/rules";
 import { bulkCategorize } from "@/lib/ai/categorize";
 import { learnMerchant } from "@/lib/categorizer/rules";
 import { categories } from "@/db/schema";
@@ -94,6 +94,7 @@ export async function POST(req: NextRequest) {
           fingerprint: row.fingerprint,
           categorySource: catResult.source,
           categoryConfidence: catResult.confidence > 0 ? String(catResult.confidence) : null,
+          hidden: isGoPlusNoise(row.description),
           rawRow: { date: row.date, time: row.time, description: row.description, amount: row.amount },
         })
         .onConflictDoNothing()

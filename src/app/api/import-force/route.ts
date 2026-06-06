@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import crypto from "crypto";
 import { db } from "@/db";
 import { transactions, importBatches } from "@/db/schema";
-import { categorizeByRules } from "@/lib/categorizer/rules";
+import { categorizeByRules, isGoPlusNoise } from "@/lib/categorizer/rules";
 import { PreviewRow } from "@/app/api/parse-preview/route";
 import { combinePostedAt } from "@/lib/format";
 
@@ -43,6 +43,7 @@ export async function POST(req: NextRequest) {
         fingerprint: forceFingerprint,
         categorySource: catResult.source,
         categoryConfidence: catResult.confidence > 0 ? String(catResult.confidence) : null,
+        hidden: isGoPlusNoise(row.description),
         rawRow: { date: row.date, time: row.time, description: row.description, amount: row.amount },
       });
       imported++;
