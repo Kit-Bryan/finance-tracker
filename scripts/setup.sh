@@ -77,8 +77,25 @@ for i in {1..30}; do
   sleep 2
 done
 
-# ── 5. schema ─────────────────────────────────────────────────────────────────
-step "5. Apply schema"
+# ── 5. pdf renderer ───────────────────────────────────────────────────────────
+step "5. Start PDF renderer"
+
+info "Building & starting the pdf-renderer service (poppler)…"
+docker compose up -d --build pdf-renderer
+for i in {1..30}; do
+  if curl -sf http://localhost:5001/health >/dev/null 2>&1; then
+    ok "PDF renderer is ready"
+    break
+  fi
+  if [[ "$i" -eq 30 ]]; then
+    info "Renderer not confirmed ready yet — it may still be building/starting. Continuing."
+    break
+  fi
+  sleep 2
+done
+
+# ── 6. schema ─────────────────────────────────────────────────────────────────
+step "6. Apply schema"
 
 # Check if schema already exists (idempotent)
 EXISTING=$(docker compose exec -T db psql -U finance finance -tAc \
@@ -96,8 +113,8 @@ else
   ok "Schema applied"
 fi
 
-# ── 6. seed ───────────────────────────────────────────────────────────────────
-step "6. Seed starter categories"
+# ── 7. seed ───────────────────────────────────────────────────────────────────
+step "7. Seed starter categories"
 
 EXISTING_CATS=$(docker compose exec -T db psql -U finance finance -tAc \
   "SELECT count(*) FROM categories;" 2>/dev/null | tr -d '[:space:]' || echo "0")
