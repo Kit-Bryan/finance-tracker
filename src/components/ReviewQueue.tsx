@@ -49,6 +49,7 @@ export default function ReviewQueue({ categories, onResolved, onCategoryCreated 
   const [saving, setSaving] = useState<number | null>(null);
   const [selections, setSelections] = useState<Record<number, CategoryValue | null>>({});
   const [hints, setHints] = useState<Record<number, string>>({});
+  const [notes, setNotes] = useState<Record<number, string>>({});
   const [aiSuggestions, setAiSuggestions] = useState<Record<number, AISuggestion>>({});
   const [suggesting, setSuggesting] = useState<Record<number, boolean>>({});
 
@@ -101,10 +102,12 @@ export default function ReviewQueue({ categories, onResolved, onCategoryCreated 
     const cat = selections[txId];
     if (!skip && !cat) return;
     setSaving(txId);
+    // For payment-method rows the hint doubles as the note
+    const note = notes[txId]?.trim() || hints[txId]?.trim() || undefined;
     await fetch(`/api/review-queue/${txId}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(skip ? { skip: true } : { categoryId: cat!.id }),
+      body: JSON.stringify(skip ? { skip: true } : { categoryId: cat!.id, note }),
     });
     setSaving(null);
     setItems((prev) => prev.filter((t) => t.id !== txId));
@@ -249,8 +252,8 @@ export default function ReviewQueue({ categories, onResolved, onCategoryCreated 
                     </div>
                   )}
 
-                  {/* Category combobox */}
-                  <div style={{ minWidth: 180 }}>
+                  {/* Category combobox + note */}
+                  <div style={{ minWidth: 180, display: "flex", flexDirection: "column", gap: 6 }}>
                     <CategoryCombobox
                       value={selected}
                       onChange={(cat) => setSelections((s) => ({ ...s, [tx.id]: cat }))}
@@ -265,6 +268,21 @@ export default function ReviewQueue({ categories, onResolved, onCategoryCreated 
                       onCategoryCreated={onCategoryCreated}
                       placeholder="Choose category…"
                     />
+                    {/* Note field — hidden for payment-method rows (their hint doubles as the note) */}
+                    {!needsHint && (
+                      <input
+                        type="text"
+                        value={notes[tx.id] ?? ""}
+                        onChange={(e) => setNotes((n) => ({ ...n, [tx.id]: e.target.value }))}
+                        placeholder="Add a note… (optional)"
+                        style={{
+                          background: "var(--bg-3)", border: "1px solid var(--border-2)",
+                          borderRadius: 4, color: "var(--text)", fontSize: 12,
+                          padding: "5px 8px", outline: "none", fontFamily: "inherit",
+                          width: "100%",
+                        }}
+                      />
+                    )}
                   </div>
 
                   {/* Actions */}

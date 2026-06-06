@@ -11,7 +11,7 @@ export async function POST(
 ) {
   const { id } = await params;
   const txId = parseInt(id);
-  const { categoryId, skip } = await req.json();
+  const { categoryId, skip, note } = await req.json();
 
   if (skip) {
     // User doesn't know — mark confidence as 1 with no category change so it leaves the queue
@@ -31,6 +31,7 @@ export async function POST(
       categoryId,
       categorySource: "user",
       categoryConfidence: "1",
+      ...(note ? { notes: note } : {}),
       updatedAt: new Date(),
     })
     .where(eq(transactions.id, txId));
