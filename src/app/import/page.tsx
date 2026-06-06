@@ -123,15 +123,17 @@ export default function ImportPage() {
       if (r.yPercent > top) { nextY = r.yPercent; break; }
     }
 
-    const PAD = 0.008; // ~half a line above the date row
+    // A little air above the date line and below the last description line.
+    const AIR_TOP = 0.012;
+    const AIR_BOTTOM = 0.008;
     if (nextY != null) {
       const gap = nextY - top;
       if (gap > 0 && gap <= 0.15) {
-        return { page, topPct: Math.max(0, top - PAD), heightPct: gap };
+        return { page, topPct: Math.max(0, top - AIR_TOP), heightPct: gap - AIR_BOTTOM + AIR_TOP };
       }
     }
     // Fallback: small centered band (~2 lines)
-    return { page, topPct: Math.max(0, top - 0.018), heightPct: 0.036 };
+    return { page, topPct: Math.max(0, top - 0.022), heightPct: 0.044 };
   }
   const band = activeBand();
 
@@ -507,32 +509,20 @@ export default function ImportPage() {
                             <div style={{
                               position: "absolute", left: 0, right: 0,
                               top: `${band!.topPct * 100}%`, height: `${band!.heightPct * 100}%`,
-                              borderRadius: 3,
+                              borderRadius: 2,
                               pointerEvents: "none", transition: "top 0.15s, height 0.15s",
                               ...(pinned
                                 ? {
-                                    // Pinned — bold, solid, with a shadow + label
-                                    background: "rgba(74,144,226,0.22)",
-                                    border: "2px solid #2f6fd0",
-                                    borderLeft: "5px solid #2f6fd0",
-                                    boxShadow: "0 0 0 2px rgba(47,111,208,0.25), 0 2px 12px rgba(0,0,0,0.18)",
+                                    // Pinned — clean solid blue outline
+                                    background: "rgba(74,144,226,0.07)",
+                                    border: "1px solid #2f6fd0",
                                   }
                                 : {
-                                    // Hover preview — lighter, dashed
-                                    background: "rgba(201,168,76,0.20)",
-                                    border: "2px dashed #c9a84c",
+                                    // Hover preview — dashed gold outline
+                                    background: "rgba(201,168,76,0.07)",
+                                    border: "1px dashed #c9a84c",
                                   }),
-                            }}>
-                              {pinned && (
-                                <span style={{
-                                  position: "absolute", top: 3, right: 5,
-                                  fontSize: 9, fontWeight: 700, letterSpacing: "0.06em",
-                                  background: "#2f6fd0", color: "#fff",
-                                  borderRadius: 3, padding: "1px 6px",
-                                  fontFamily: "var(--font-ibm-mono)",
-                                }}>PINNED</span>
-                              )}
-                            </div>
+                            }} />
                           )}
                         </div>
                       );
