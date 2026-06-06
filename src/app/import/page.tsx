@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useRef, useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { formatCurrency } from "@/lib/format";
 
@@ -63,6 +63,17 @@ export default function ImportPage() {
   } | null>(null);
   const [selectedSkipped, setSelectedSkipped] = useState<Set<number>>(new Set());
   const [forceImporting, setForceImporting] = useState(false);
+
+  // Side-by-side original document preview (PDF/image) — blob URL, no upload needed
+  const [showOriginal, setShowOriginal] = useState(true);
+  const [fileUrl, setFileUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!file) { setFileUrl(null); return; }
+    const url = URL.createObjectURL(file);
+    setFileUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
 
   const onDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -164,8 +175,13 @@ export default function ImportPage() {
   const totalExpense = validRows.filter((r) => r.amount < 0).reduce((s, r) => s + r.amount, 0);
   const totalIncome = validRows.filter((r) => r.amount > 0).reduce((s, r) => s + r.amount, 0);
 
+  const isPdfFile = !!file && (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf"));
+  const isImageFile = !!file && (file.type.startsWith("image/") || IMAGE_RE.test(file.name));
+  const canShowOriginal = (isPdfFile || isImageFile) && !!fileUrl;
+  const splitView = step === "preview" && showOriginal && canShowOriginal;
+
   return (
-    <div style={{ padding: "32px 36px", maxWidth: 860, margin: "0 auto" }}>
+    <div style={{ padding: "32px 36px", maxWidth: splitView ? 1280 : 860, margin: "0 auto", transition: "max-width 0.2s" }}>
       {/* Header */}
       <div className="fade-up fade-up-1" style={{ marginBottom: 32 }}>
         <h1 style={{ fontFamily: "var(--font-syne)", fontSize: 26, fontWeight: 700, letterSpacing: "-0.03em", color: "var(--text)" }}>
@@ -240,7 +256,7 @@ export default function ImportPage() {
                   Drop your bank statement here
                 </div>
                 <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                  CSV, PDF, or image (PNG/JPG) · Maybank, CIMB, Touch 'n Go, RHB, Public Bank…
+                  CSV, PDF, or image (PNG/JPG) · Maybank, CIMB, Touch &apos;n Go, RHB, Public Bank…
                 </div>
               </>
             )}
@@ -329,41 +345,74 @@ export default function ImportPage() {
             </div>
           )}
 
-          {/* Transaction preview table */}
-          <div style={{ background: "var(--bg-2)", border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden", marginBottom: 20 }}>
-            <div style={{ maxHeight: 420, overflowY: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                <thead style={{ position: "sticky", top: 0, background: "var(--bg-2)", zIndex: 1 }}>
-                  <tr style={{ borderBottom: "1px solid var(--border)" }}>
-                    {["Date", "Description", "Amount"].map((h) => (
-                      <th key={h} style={{
-                        padding: "10px 20px", textAlign: h === "Amount" ? "right" : "left",
-                        fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase",
-                        color: "var(--text-muted)", fontWeight: 500,
-                      }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {preview.rows.map((row, i) => {
-                    const isIncome = row.amount > 0;
-                    const hasError = !!row.parseError;
-                    return (
-                      <tr key={i} style={{ borderBottom: "1px solid var(--border)", background: hasError ? "var(--expense-dim)" : "transparent" }}>
-                        <td style={{ padding: "9px 20px", fontSize: 12, color: "var(--text-muted)", fontFamily: "var(--font-ibm-mono)", whiteSpace: "nowrap" }}>
-                          {row.date || "—"}{row.time ? ` ${row.time}` : ""}
-                        </td>
-                        <td style={{ padding: "9px 20px", fontSize: 13, color: hasError ? "var(--expense)" : "var(--text)", maxWidth: 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {hasError ? `⚠ ${row.parseError}` : row.description}
-                        </td>
-                        <td style={{ padding: "9px 20px", textAlign: "right", fontFamily: "var(--font-ibm-mono)", fontSize: 13, fontWeight: 500, color: hasError ? "var(--text-muted)" : isIncome ? "var(--income)" : "var(--expense)", whiteSpace: "nowrap" }}>
-                          {hasError ? "—" : `${isIncome ? "+" : ""}${formatCurrency(row.amount, "MYR")}`}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+          {/* Toggle: show original document side by side */}
+          {canShowOriginal && (
+            <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
+              <button onClick={() => setShowOriginal((s) => !s)} style={ghostBtn}>
+                {showOriginal ? "Hide original" : "Show original ⇄"}
+              </button>
+            </div>
+          )}
+
+          {/* Original document + parsed transactions (side by side when enabled) */}
+          <div style={{
+            display: splitView ? "grid" : "block",
+            gridTemplateColumns: splitView ? "minmax(0, 1fr) minmax(0, 1fr)" : undefined,
+            gap: 14, marginBottom: 20, alignItems: "start",
+          }}>
+            {/* Original document pane */}
+            {splitView && (
+              <div style={{ background: "var(--bg-2)", border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden", position: "sticky", top: 0 }}>
+                <div style={{ padding: "10px 16px", borderBottom: "1px solid var(--border)", fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  Original — {file?.name}
+                </div>
+                {isPdfFile ? (
+                  <iframe src={fileUrl!} title="Original statement" style={{ width: "100%", height: 600, border: "none", background: "#fff", display: "block" }} />
+                ) : (
+                  <div style={{ maxHeight: 600, overflowY: "auto", background: "#fff" }}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={fileUrl!} alt="Original statement" style={{ width: "100%", display: "block" }} />
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Parsed transactions table */}
+            <div style={{ background: "var(--bg-2)", border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden" }}>
+              <div style={{ maxHeight: splitView ? 600 : 420, overflowY: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead style={{ position: "sticky", top: 0, background: "var(--bg-2)", zIndex: 1 }}>
+                    <tr style={{ borderBottom: "1px solid var(--border)" }}>
+                      {["Date", "Description", "Amount"].map((h) => (
+                        <th key={h} style={{
+                          padding: "10px 20px", textAlign: h === "Amount" ? "right" : "left",
+                          fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase",
+                          color: "var(--text-muted)", fontWeight: 500,
+                        }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {preview.rows.map((row, i) => {
+                      const isIncome = row.amount > 0;
+                      const hasError = !!row.parseError;
+                      return (
+                        <tr key={i} style={{ borderBottom: "1px solid var(--border)", background: hasError ? "var(--expense-dim)" : "transparent" }}>
+                          <td style={{ padding: "9px 20px", fontSize: 12, color: "var(--text-muted)", fontFamily: "var(--font-ibm-mono)", whiteSpace: "nowrap" }}>
+                            {row.date || "—"}{row.time ? ` ${row.time}` : ""}
+                          </td>
+                          <td style={{ padding: "9px 20px", fontSize: 13, color: hasError ? "var(--expense)" : "var(--text)", maxWidth: 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {hasError ? `⚠ ${row.parseError}` : row.description}
+                          </td>
+                          <td style={{ padding: "9px 20px", textAlign: "right", fontFamily: "var(--font-ibm-mono)", fontSize: 13, fontWeight: 500, color: hasError ? "var(--text-muted)" : isIncome ? "var(--income)" : "var(--expense)", whiteSpace: "nowrap" }}>
+                            {hasError ? "—" : `${isIncome ? "+" : ""}${formatCurrency(row.amount, "MYR")}`}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
 
