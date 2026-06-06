@@ -27,6 +27,7 @@ export async function GET() {
     .where(
       and(
         isNull(transactions.deletedAt),
+        isNull(transactions.reimbursementForId), // linked repayments don't need categorizing
         or(
           isNull(transactions.categoryId),
           and(
