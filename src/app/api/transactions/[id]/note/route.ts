@@ -22,31 +22,37 @@ export async function POST(
   const cat = allCats.find((c) => c.id === tx.categoryId);
   const ai = getAIClient();
 
-  const prompt = `Write a very short plain-English note (max 6 words) for this Malaysian bank transaction.
-Focus on WHO or WHAT — ignore reference numbers, transaction IDs, and random codes entirely.
-If no useful context exists beyond the merchant name, return an empty string.
+  const prompt = `Write a concise plain-English note (6–10 words) for this Malaysian bank transaction.
+Your goal is to extract the most useful human-readable context from the raw description — especially
+any remarks, names, purposes, or references to what the money was for.
+Ignore transaction IDs, reference numbers, and random alphanumeric codes entirely.
+If the raw description contains no useful context beyond the merchant name, return an empty string.
 
 Raw bank description: "${tx.description}"
 Merchant: ${tx.merchantNormalized ?? "unknown"}
 Category: ${cat?.name ?? "uncategorized"}
 Amount: MYR ${Math.abs(parseFloat(tx.amount as string))} (${parseFloat(tx.amount as string) < 0 ? "expense" : "income"})
 
-Good examples:
+Good examples (extract the meaningful remark, name, or purpose):
 - "Meal allowance from Wong Hon Sun"
-- "ChatGPT subscription"
+- "ChatGPT Plus monthly subscription"
 - "Transfer from Bryan Wong Win Kit"
-- "Haircut at Michael & Guys"
-- "" (empty — when there's nothing useful to add beyond merchant name)
+- "Haircut at Michael & Guys 1 Utama"
+- "Salary advance for June"
+- "Payment for Mayflour group meal"
+- "Grab food delivery order"
+- "" (empty — when there's nothing useful to add beyond the merchant name)
 
 Bad examples (never do this):
-- "GrabPay payment (ref: xyz123abc)" — don't include refs
-- "FPX payment (ref: 2508151328240355)" — don't include refs
+- "GrabPay payment (ref: xyz123abc)" — don't include refs/codes
+- "FPX payment (ref: 2508151328240355)" — don't include refs/codes
+- "Transaction at Shopee" — too generic, just return empty
 
 Touch 'n Go GO+ direction (commonly misread — get this right):
-- "Quick Reload Payment (via GO+ Balance)" = money pulled OUT of GO+ into the eWallet to fund a payment (GO+ → eWallet). Note: "Funded from GO+ balance" — NEVER "reload to GO+" (opposite direction).
-- "eWallet Cash Out" / "Via eWallet to GO+" = money moved FROM the eWallet INTO GO+ (eWallet → GO+). Note: "Moved to GO+ balance".
+- "Quick Reload Payment (via GO+ Balance)" = GO+ → eWallet (funds a payment). Note: "Funded from GO+ balance"
+- "eWallet Cash Out" / "Via eWallet to GO+" = eWallet → GO+. Note: "Moved to GO+ balance"
 
-Return ONLY the note text or empty string, no quotes, no explanation.`;
+Return ONLY the note text or an empty string. No quotes, no explanation.`;
 
   const resp = await ai.chat.completions.create({
     model: DEFAULT_MODEL,
