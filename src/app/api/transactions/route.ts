@@ -60,6 +60,7 @@ export async function GET(req: NextRequest) {
       categorySource: transactions.categorySource,
       categoryConfidence: transactions.categoryConfidence,
       hidden: transactions.hidden,
+      reimbursementForId: transactions.reimbursementForId,
       notes: transactions.notes,
     })
     .from(transactions)
