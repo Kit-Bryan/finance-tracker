@@ -37,6 +37,7 @@ interface PreviewResponse {
   errorRows: number;
   truncated?: boolean;
   truncationNote?: string;
+  pageImages?: string[];
 }
 
 const ACCEPT = ".csv,.pdf,.png,.jpg,.jpeg,.webp,.gif,.bmp,text/csv,application/pdf,image/*";
@@ -193,8 +194,13 @@ export default function ImportPage() {
 
   const isPdfFile = !!file && (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf"));
   const isImageFile = !!file && (file.type.startsWith("image/") || IMAGE_RE.test(file.name));
-  const canShowOriginal = (isPdfFile || isImageFile) && !!fileUrl;
-  const splitView = step === "preview" && showOriginal && canShowOriginal;
+  // Comparison pane uses rasterized page images: PDF pages from the server,
+  // or the locally-loaded blob for direct image uploads.
+  const comparisonImages = isImageFile
+    ? (fileUrl ? [fileUrl] : [])
+    : (preview?.pageImages ?? []);
+  const canShowOriginal = step === "preview" && comparisonImages.length > 0;
+  const splitView = showOriginal && canShowOriginal;
 
   return (
     <div style={{ padding: "32px 36px", maxWidth: splitView ? 1280 : 860, margin: "0 auto", transition: "max-width 0.2s" }}>
@@ -382,35 +388,43 @@ export default function ImportPage() {
             </div>
           )}
 
-          {/* Toggle: show original document side by side */}
+          {/* Collapsed: the real PDF document (for zoom / scroll / verifying the source) */}
+          {isPdfFile && fileUrl && (
+            <details style={{ marginBottom: 12, background: "var(--bg-2)", border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden" }}>
+              <summary style={{ padding: "10px 16px", fontSize: 12, color: "var(--text-muted)", cursor: "pointer", userSelect: "none" }}>
+                📄 View original PDF — {file?.name}
+              </summary>
+              <iframe src={fileUrl} title="Original PDF" style={{ width: "100%", height: 600, border: "none", borderTop: "1px solid var(--border)", background: "#fff", display: "block" }} />
+            </details>
+          )}
+
+          {/* Toggle: show rendered pages side by side with parsed transactions */}
           {canShowOriginal && (
             <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
               <button onClick={() => setShowOriginal((s) => !s)} style={ghostBtn}>
-                {showOriginal ? "Hide original" : "Show original ⇄"}
+                {showOriginal ? "Hide comparison" : "Compare side by side ⇄"}
               </button>
             </div>
           )}
 
-          {/* Original document + parsed transactions (side by side when enabled) */}
+          {/* Rendered pages + parsed transactions (side by side when enabled) */}
           <div style={{
             display: splitView ? "grid" : "block",
             gridTemplateColumns: splitView ? "minmax(0, 1fr) minmax(0, 1fr)" : undefined,
             gap: 14, marginBottom: 20, alignItems: "start",
           }}>
-            {/* Original document pane */}
+            {/* Rendered document pane */}
             {splitView && (
               <div style={{ background: "var(--bg-2)", border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden", position: "sticky", top: 0 }}>
                 <div style={{ padding: "10px 16px", borderBottom: "1px solid var(--border)", fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  Original — {file?.name}
+                  Statement — {file?.name}
                 </div>
-                {isPdfFile ? (
-                  <iframe src={fileUrl!} title="Original statement" style={{ width: "100%", height: 600, border: "none", background: "#fff", display: "block" }} />
-                ) : (
-                  <div style={{ maxHeight: 600, overflowY: "auto", background: "#fff" }}>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={fileUrl!} alt="Original statement" style={{ width: "100%", display: "block" }} />
-                  </div>
-                )}
+                <div style={{ maxHeight: 600, overflowY: "auto", background: "#fff" }}>
+                  {comparisonImages.map((src, i) => (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img key={i} src={src} alt={`Statement page ${i + 1}`} style={{ width: "100%", display: "block", borderBottom: i < comparisonImages.length - 1 ? "1px solid #ddd" : "none" }} />
+                  ))}
+                </div>
               </div>
             )}
 

@@ -45,6 +45,7 @@ export interface PreviewResponse {
   errorRows: number;
   truncated?: boolean;       // true if the document was too large to fully scan
   truncationNote?: string;   // human-readable explanation
+  pageImages?: string[];     // rasterized PDF pages (base64 PNG data URLs) for the side-by-side comparison
 }
 
 function mimeFromName(name: string): string {
@@ -178,6 +179,7 @@ export async function POST(req: NextRequest) {
     let result;
     let truncated = false;
     let truncationNote: string | undefined;
+    let pageImages: string[] = [];   // rasterized pages, reused for the comparison view
     try {
       if (hasTextLayer) {
         result = await parsePdfStatement(pdfText);
@@ -188,12 +190,14 @@ export async function POST(req: NextRequest) {
         // Digital PDF whose text parsed to nothing useful → try vision as a backstop
         if (result.transactions.length === 0) {
           const r = await renderPdfToImages(buffer);
+          pageImages = r.images;
           result = await parseImageStatement(r.images);
           if (r.truncated) { truncated = true; truncationNote = `Only the first ${r.images.length} of ${r.totalPages} pages were scanned — some transactions may be missing.`; }
         }
       } else {
         // No extractable text → scanned/image PDF → must rasterize and use vision
         const r = await renderPdfToImages(buffer);
+        pageImages = r.images;
         result = await parseImageStatement(r.images);
         if (r.truncated) { truncated = true; truncationNote = `Only the first ${r.images.length} of ${r.totalPages} pages were scanned — some transactions may be missing.`; }
       }
@@ -203,6 +207,17 @@ export async function POST(req: NextRequest) {
         ? `AI parsing failed: ${e}`
         : `This PDF has no text layer (likely scanned) and the PDF renderer is unavailable: ${e}`;
       return NextResponse.json({ error: hint }, { status: hasTextLayer ? 500 : 422 });
+    }
+
+    // Text-parsed PDFs were never rasterized — render now for the side-by-side
+    // comparison view. Non-fatal: if it fails, the UI falls back to the collapsed iframe.
+    if (pageImages.length === 0) {
+      try {
+        const r = await renderPdfToImages(buffer);
+        pageImages = r.images;
+      } catch (e) {
+        log.warn({ err: e, filename: file.name }, "could not rasterize PDF for preview display");
+      }
     }
 
     const { transactions, account } = result;
@@ -228,6 +243,7 @@ export async function POST(req: NextRequest) {
       errorRows: 0,
       truncated,
       truncationNote,
+      pageImages,
     } satisfies PreviewResponse);
   }
 
