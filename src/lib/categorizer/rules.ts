@@ -19,6 +19,35 @@ export function normalizeMerchant(description: string): string {
     .trim();
 }
 
+/**
+ * Multi-purpose payment platforms whose normalized name gives no signal about
+ * the actual spending category. Merchant memory is useless (and actively
+ * harmful) for these — skip both lookup and saving so the AI categorizer
+ * always gets a fresh shot using the full transaction description.
+ */
+const GENERIC_MERCHANT_PATTERNS: RegExp[] = [
+  /^grabpay/,
+  /^grab$/,
+  /^tng\b/,           // Touch 'n Go
+  /^touch n go/,
+  /^touchngo/,
+  /^duitnow/,
+  /^fpx\b/,
+  /^boost\b/,
+  /^shopeepay/,
+  /^shopee pay/,
+  /^mae\b/,           // Maybank e-wallet
+  /^bigpay/,
+  /^fund transfer/,
+  /^interbank/,
+  /^ibk\b/,
+  /^transfer\b/,
+];
+
+export function isGenericMerchant(normalizedName: string): boolean {
+  return GENERIC_MERCHANT_PATTERNS.some((re) => re.test(normalizedName));
+}
+
 export async function categorizeByRules(description: string): Promise<CategoryResult> {
   const rules = await db
     .select()
@@ -58,19 +87,21 @@ export async function categorizeByRules(description: string): Promise<CategoryRe
     }
   }
 
-  // Fall back to merchant memory
+  // Fall back to merchant memory — skip for generic multi-category platforms
   const normalized = normalizeMerchant(description);
-  const [merchant] = await db
-    .select()
-    .from(merchants)
-    .where(eq(merchants.normalizedName, normalized));
+  if (!isGenericMerchant(normalized)) {
+    const [merchant] = await db
+      .select()
+      .from(merchants)
+      .where(eq(merchants.normalizedName, normalized));
 
-  if (merchant?.categoryId) {
-    return {
-      categoryId: merchant.categoryId,
-      source: "merchant",
-      confidence: 0.9,
-    };
+    if (merchant?.categoryId) {
+      return {
+        categoryId: merchant.categoryId,
+        source: "merchant",
+        confidence: 0.9,
+      };
+    }
   }
 
   return { categoryId: null, source: "none", confidence: 0 };
@@ -105,6 +136,9 @@ export async function learnMerchant(
 ) {
   const normalized = normalizeMerchant(description);
   if (!normalized) return;
+
+  // Don't memorise generic platforms — they appear in many categories
+  if (isGenericMerchant(normalized)) return;
 
   const [existing] = await db
     .select()
