@@ -112,6 +112,12 @@ export default function ReviewQueue({ categories, onResolved, onCategoryCreated 
     setSaving(null);
     setItems((prev) => prev.filter((t) => t.id !== txId));
     onResolved();
+
+    // If no note was provided, silently generate one in the background.
+    // By this point the category is saved, so the AI has full context.
+    if (!skip && !note) {
+      fetch(`/api/transactions/${txId}/note`, { method: "POST" }).catch(() => {});
+    }
   }
 
   async function acceptAll() {
