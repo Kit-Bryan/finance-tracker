@@ -302,6 +302,12 @@ export default function TransactionsContent() {
               {bulkRunning ? "Categorizing…" : `✦ AI categorize ${uncategorizedCount}`}
             </button>
           )}
+          <button onClick={hideGoPlusNoise} title="Hide all GO+ internal legs (Quick Reload / Cash Out) already imported" style={{
+            padding: "7px 14px", borderRadius: 6, border: "1px solid var(--border-2)",
+            background: "var(--bg-3)", color: "var(--text-muted)", fontSize: 12, cursor: "pointer", fontFamily: "inherit",
+          }}>
+            Hide GO+ noise
+          </button>
           <button onClick={() => setShowHidden((s) => !s)} title="Toggle hidden transactions (e.g. GO+ internal legs)" style={{
             padding: "7px 14px", borderRadius: 6, border: "1px solid var(--border-2)",
             background: showHidden ? "var(--accent-dim)" : "var(--bg-3)", color: showHidden ? "var(--accent)" : "var(--text-muted)", fontSize: 12, cursor: "pointer", fontFamily: "inherit",
