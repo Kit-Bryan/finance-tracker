@@ -220,10 +220,20 @@ export default function CategoryCombobox({
         {allFiltered.length === 0 && q && <div style={{ padding: "12px 14px", color: "var(--text-muted)", fontSize: 12 }}>No matches — create it below</div>}
         {grouped.map(({ parent, children }, gi) => (
           <div key={gi}>
-            {parent && !q && <div style={{ padding: "6px 10px 2px", fontSize: 10, letterSpacing: "0.08em", color: "var(--text-muted)", textTransform: "uppercase" }}>{parent.name}</div>}
+            {parent && (
+              <button key={`p-${parent.id}`} onClick={() => selectCat(parent)}
+                style={{ width: "100%", padding: "7px 14px", background: value?.id === parent.id ? "var(--accent-dim)" : "none", border: "none", textAlign: "left", cursor: "pointer", display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 600, color: value?.id === parent.id ? "var(--accent)" : "var(--text)", fontFamily: "inherit" }}
+                onMouseEnter={(e) => { if (value?.id !== parent.id) e.currentTarget.style.background = "var(--border)"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = value?.id === parent.id ? "var(--accent-dim)" : "none"; }}
+              >
+                {parent.color && <span style={{ width: 7, height: 7, borderRadius: "50%", background: parent.color, flexShrink: 0 }} />}
+                {parent.name}
+                {value?.id === parent.id && <span style={{ marginLeft: "auto", fontSize: 11 }}>✓</span>}
+              </button>
+            )}
             {children.map((cat) => (
               <button key={cat.id} onClick={() => selectCat(cat)}
-                style={{ width: "100%", padding: "7px 14px", background: value?.id === cat.id ? "var(--accent-dim)" : "none", border: "none", textAlign: "left", cursor: "pointer", display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: value?.id === cat.id ? "var(--accent)" : "var(--text)", fontFamily: "inherit" }}
+                style={{ width: "100%", padding: "7px 14px", paddingLeft: parent ? 28 : 14, background: value?.id === cat.id ? "var(--accent-dim)" : "none", border: "none", textAlign: "left", cursor: "pointer", display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: value?.id === cat.id ? "var(--accent)" : "var(--text)", fontFamily: "inherit" }}
                 onMouseEnter={(e) => { if (value?.id !== cat.id) e.currentTarget.style.background = "var(--border)"; }}
                 onMouseLeave={(e) => { e.currentTarget.style.background = value?.id === cat.id ? "var(--accent-dim)" : "none"; }}
               >
