@@ -95,23 +95,13 @@ for i in {1..30}; do
 done
 
 # ── 6. schema ─────────────────────────────────────────────────────────────────
-step "6. Apply schema"
+step "6. Sync schema"
 
-# Check if schema already exists (idempotent)
-EXISTING=$(docker compose exec -T db psql -U finance finance -tAc \
-  "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'transactions';" \
-  2>/dev/null | tr -d '[:space:]' || echo "0")
-
-if [[ "$EXISTING" == "1" ]]; then
-  ok "Schema already exists — skipping"
-else
-  info "Applying migrations…"
-  for migration in src/db/migrations/*.sql; do
-    [[ -f "$migration" ]] || continue
-    docker compose exec -T db psql -U finance finance < "$migration" > /dev/null
-  done
-  ok "Schema applied"
-fi
+# drizzle-kit push reconciles the database to the schema in src/db/schema — idempotent,
+# works on an empty DB (creates everything) or an existing one (adds what's missing).
+info "Syncing schema to the database (drizzle-kit push)…"
+npm run db:push --silent
+ok "Schema in sync"
 
 # ── 7. seed ───────────────────────────────────────────────────────────────────
 step "7. Seed starter categories"
