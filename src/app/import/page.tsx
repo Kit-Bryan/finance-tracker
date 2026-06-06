@@ -73,11 +73,15 @@ export default function ImportPage() {
   const [showOriginal, setShowOriginal] = useState(true);
   const [fileUrl, setFileUrl] = useState<string | null>(null);
 
-  // Hover-to-highlight + zoom for the rendered statement comparison
+  // Hover-to-highlight (transient) + click-to-pin (persists) + zoom
   const [hoveredRow, setHoveredRow] = useState<number | null>(null);
+  const [selectedRow, setSelectedRow] = useState<number | null>(null);
   const [zoom, setZoom] = useState(1);
   const imgPaneRef = useRef<HTMLDivElement>(null);
   const pageRefs = useRef<Record<number, HTMLImageElement | null>>({});
+
+  // Hover takes precedence for live preview; selection persists when not hovering.
+  const activeRow = hoveredRow != null ? hoveredRow : selectedRow;
 
   useEffect(() => {
     if (!file) { setFileUrl(null); return; }
@@ -86,10 +90,10 @@ export default function ImportPage() {
     return () => URL.revokeObjectURL(url);
   }, [file]);
 
-  // When a transaction row is hovered, scroll its location into view on the statement image
+  // Scroll the active transaction's location into view on the statement image
   useEffect(() => {
-    if (hoveredRow == null || !preview) return;
-    const row = preview.rows[hoveredRow];
+    if (activeRow == null || !preview) return;
+    const row = preview.rows[activeRow];
     if (!row || row.yPercent == null) return;
     const img = pageRefs.current[row.page ?? 0];
     const pane = imgPaneRef.current;
@@ -98,7 +102,38 @@ export default function ImportPage() {
     const paneRect = pane.getBoundingClientRect();
     const target = (imgRect.top - paneRect.top) + row.yPercent * imgRect.height + pane.scrollTop - pane.clientHeight / 2;
     pane.scrollTo({ top: target, behavior: "smooth" });
-  }, [hoveredRow, preview, zoom]);
+  }, [activeRow, preview, zoom]);
+
+  // The highlight band for the active row: span down to the next transaction on the
+  // same page (covers multi-line rows). Falls back to a small centered strip when the
+  // span can't be determined confidently — never worse than the original behavior.
+  function activeBand(): { page: number; topPct: number; heightPct: number } | null {
+    if (activeRow == null || !preview) return null;
+    const rows = preview.rows;
+    const row = rows[activeRow];
+    if (!row || row.yPercent == null) return null;
+    const page = row.page ?? 0;
+    const top = row.yPercent;
+
+    let nextY: number | null = null;
+    for (let j = activeRow + 1; j < rows.length; j++) {
+      const r = rows[j];
+      if (r.yPercent == null) continue;
+      if ((r.page ?? 0) !== page) break;          // moved to another page
+      if (r.yPercent > top) { nextY = r.yPercent; break; }
+    }
+
+    const PAD = 0.008; // ~half a line above the date row
+    if (nextY != null) {
+      const gap = nextY - top;
+      if (gap > 0 && gap <= 0.15) {
+        return { page, topPct: Math.max(0, top - PAD), heightPct: gap };
+      }
+    }
+    // Fallback: small centered band (~2 lines)
+    return { page, topPct: Math.max(0, top - 0.018), heightPct: 0.036 };
+  }
+  const band = activeBand();
 
   const onDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -207,6 +242,8 @@ export default function ImportPage() {
     setParseError("");
     setSaveProfile(true);
     setSelectedSkipped(new Set());
+    setHoveredRow(null);
+    setSelectedRow(null);
   }
 
   const validRows = preview?.rows.filter((r) => !r.parseError) ?? [];
@@ -425,7 +462,7 @@ export default function ImportPage() {
             <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10, marginBottom: 10 }}>
               {splitView && (
                 <>
-                  <span style={{ fontSize: 11, color: "var(--text-dim)" }}>Hover a transaction to find it on the statement</span>
+                  <span style={{ fontSize: 11, color: "var(--text-dim)" }}>Hover to locate · click to pin{selectedRow != null ? " · click again to unpin" : ""}</span>
                   <div style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: "auto" }}>
                     <button onClick={() => setZoom((z) => Math.max(0.5, +(z - 0.25).toFixed(2)))} style={zoomBtn} title="Zoom out">−</button>
                     <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-ibm-mono)", minWidth: 40, textAlign: "center" }}>{Math.round(zoom * 100)}%</span>
@@ -455,8 +492,8 @@ export default function ImportPage() {
                 <div ref={imgPaneRef} style={{ maxHeight: 600, overflow: "auto", background: "#fff" }}>
                   <div style={{ width: `${zoom * 100}%`, transition: "width 0.15s" }}>
                     {comparisonImages.map((src, i) => {
-                      const hovered = hoveredRow != null && preview ? preview.rows[hoveredRow] : null;
-                      const showStrip = !!hovered && (hovered.page ?? 0) === i && hovered.yPercent != null;
+                      const showBand = !!band && band.page === i;
+                      const pinned = hoveredRow == null && selectedRow != null;
                       return (
                         <div key={i} style={{ position: "relative" }}>
                           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -466,14 +503,36 @@ export default function ImportPage() {
                             alt={`Statement page ${i + 1}`}
                             style={{ width: "100%", display: "block", borderBottom: i < comparisonImages.length - 1 ? "1px solid #ddd" : "none" }}
                           />
-                          {showStrip && (
+                          {showBand && (
                             <div style={{
                               position: "absolute", left: 0, right: 0,
-                              top: `${hovered!.yPercent! * 100}%`, transform: "translateY(-50%)",
-                              height: 32, background: "rgba(201,168,76,0.28)",
-                              borderTop: "2px solid #c9a84c", borderBottom: "2px solid #c9a84c",
-                              pointerEvents: "none", transition: "top 0.15s",
-                            }} />
+                              top: `${band!.topPct * 100}%`, height: `${band!.heightPct * 100}%`,
+                              borderRadius: 3,
+                              pointerEvents: "none", transition: "top 0.15s, height 0.15s",
+                              ...(pinned
+                                ? {
+                                    // Pinned — bold, solid, with a shadow + label
+                                    background: "rgba(74,144,226,0.22)",
+                                    border: "2px solid #2f6fd0",
+                                    borderLeft: "5px solid #2f6fd0",
+                                    boxShadow: "0 0 0 2px rgba(47,111,208,0.25), 0 2px 12px rgba(0,0,0,0.18)",
+                                  }
+                                : {
+                                    // Hover preview — lighter, dashed
+                                    background: "rgba(201,168,76,0.20)",
+                                    border: "2px dashed #c9a84c",
+                                  }),
+                            }}>
+                              {pinned && (
+                                <span style={{
+                                  position: "absolute", top: 3, right: 5,
+                                  fontSize: 9, fontWeight: 700, letterSpacing: "0.06em",
+                                  background: "#2f6fd0", color: "#fff",
+                                  borderRadius: 3, padding: "1px 6px",
+                                  fontFamily: "var(--font-ibm-mono)",
+                                }}>PINNED</span>
+                              )}
+                            </div>
                           )}
                         </div>
                       );
@@ -507,9 +566,15 @@ export default function ImportPage() {
                         <tr key={i}
                           onMouseEnter={() => setHoveredRow(i)}
                           onMouseLeave={() => setHoveredRow((h) => (h === i ? null : h))}
+                          onClick={() => { if (locatable) setSelectedRow((s) => (s === i ? null : i)); }}
                           style={{
                             borderBottom: "1px solid var(--border)",
-                            background: hoveredRow === i && locatable ? "var(--accent-dim)" : hasError ? "var(--expense-dim)" : "transparent",
+                            background: hoveredRow === i && locatable
+                              ? "var(--accent-dim)"                 // gold hover — matches dashed gold band
+                              : selectedRow === i && locatable
+                                ? "rgba(74,144,226,0.14)"           // blue pinned — matches blue band
+                                : hasError ? "var(--expense-dim)" : "transparent",
+                            borderLeft: selectedRow === i && locatable ? "3px solid #2f6fd0" : "2px solid transparent",
                             cursor: locatable ? "pointer" : "default",
                             transition: "background 0.1s",
                           }}>
