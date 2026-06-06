@@ -23,6 +23,7 @@ export async function POST(req: NextRequest) {
 
   let imported = 0;
   let failed = 0;
+  const results: boolean[] = []; // per-row success, aligned to the input `rows` order
 
   for (const row of rows) {
     const catResult = await categorizeByRules(row.description);
@@ -50,8 +51,10 @@ export async function POST(req: NextRequest) {
         rawRow: { date: row.date, time: row.time, description: row.description, amount: row.amount },
       });
       imported++;
+      results.push(true);
     } catch (err) {
       failed++;
+      results.push(false);
       log.error({ err, batchId, description: row.description }, "force-import row failed");
     }
   }
@@ -63,5 +66,5 @@ export async function POST(req: NextRequest) {
   }
 
   if (failed > 0) log.warn({ batchId, imported, failed }, "force-import completed with failures");
-  return NextResponse.json({ imported, failed });
+  return NextResponse.json({ imported, failed, results });
 }

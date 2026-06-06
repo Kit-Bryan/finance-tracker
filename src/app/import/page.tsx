@@ -144,22 +144,36 @@ export default function ImportPage() {
   async function forceImportSelected() {
     if (!result || selectedSkipped.size === 0) return;
     setForceImporting(true);
-    const rows = result.skippedDetails.filter((_, i) => selectedSkipped.has(i));
+    // Original indices in the order they're sent (ascending) — maps to the API's per-row results.
+    const sentIndexes = [...selectedSkipped].sort((a, b) => a - b);
+    const rows = sentIndexes.map((i) => result.skippedDetails[i]);
     const res = await fetch("/api/import-force", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ batchId: result.batchId, accountId: result.accountId, rows }),
     });
-    const data = await res.json();
-    // Update result to reflect newly imported rows
-    setResult((r) => r ? {
-      ...r,
-      importedRows: r.importedRows + data.imported,
-      skippedDetails: r.skippedDetails.filter((_, i) => !selectedSkipped.has(i)),
-      skippedRows: r.skippedRows - data.imported,
-    } : r);
+    const data = await res.json() as { imported: number; failed: number; results?: boolean[] };
+
+    // Original indices of rows that FAILED — keep these visible in the skip list.
+    const failedOriginal = new Set(
+      data.results ? sentIndexes.filter((_, k) => !data.results![k]) : []
+    );
+
+    setResult((r) => {
+      if (!r) return r;
+      const newSkipped = r.skippedDetails.filter((_, i) => !selectedSkipped.has(i) || failedOriginal.has(i));
+      return {
+        ...r,
+        importedRows: r.importedRows + data.imported,
+        skippedDetails: newSkipped,
+        skippedRows: newSkipped.length,
+      };
+    });
     setSelectedSkipped(new Set());
     setForceImporting(false);
+    if (data.failed > 0) {
+      setParseError(`${data.failed} transaction${data.failed !== 1 ? "s" : ""} couldn't be imported and remain in the list below.`);
+    }
   }
 
   function reset() {
@@ -457,6 +471,11 @@ export default function ImportPage() {
       {/* ── STEP: DONE ───────────────────────────────────────── */}
       {step === "done" && result && (
         <div className="fade-up fade-up-2" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {parseError && (
+            <div style={{ padding: "12px 16px", background: "var(--expense-dim)", border: "1px solid #f8717133", borderRadius: 6, color: "var(--expense)", fontSize: 13 }}>
+              {parseError}
+            </div>
+          )}
           {/* Summary */}
           <div style={{ background: "var(--bg-2)", border: "1px solid var(--border)", borderRadius: 10, padding: "32px", textAlign: "center" }}>
             <div style={{ fontSize: 36, marginBottom: 12 }}>✓</div>
