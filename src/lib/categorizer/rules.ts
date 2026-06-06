@@ -48,6 +48,21 @@ export function isGenericMerchant(normalizedName: string): boolean {
   return GENERIC_MERCHANT_PATTERNS.some((re) => re.test(normalizedName));
 }
 
+/**
+ * Touch 'n Go GO+ internal "plumbing" legs — pure noise that only exists to fund a
+ * payment or park money inside the wallet (e.g. "Quick Reload Payment (via GO+ Balance)",
+ * "eWallet Cash Out — Via eWallet to GO+"). Used to auto-hide them from the list on import.
+ * Deterministic, no AI needed — the wording is unambiguous.
+ */
+export function isGoPlusNoise(description: string): boolean {
+  const d = (description ?? "").toLowerCase();
+  if (d.includes("ewallet cash out")) return true;
+  if (d.includes("go+")) {
+    return d.includes("reload") || d.includes("cash out") || d.includes("ewallet") || d.includes("balance");
+  }
+  return false;
+}
+
 export async function categorizeByRules(description: string): Promise<CategoryResult> {
   const rules = await db
     .select()

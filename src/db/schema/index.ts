@@ -105,6 +105,7 @@ export const transactions = pgTable(
     isTransfer: boolean("is_transfer").default(false),
     transferPairId: integer("transfer_pair_id"),
     reimbursementForId: integer("reimbursement_for_id"), // links a repayment transfer back to the original group expense
+    hidden: boolean("hidden").default(false), // cosmetic: keep the row but hide it from the list (e.g. GO+ internal legs)
     rawRow: jsonb("raw_row"),
     notes: text("notes"),
     deletedAt: timestamp("deleted_at"),
