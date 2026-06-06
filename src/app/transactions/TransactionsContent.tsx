@@ -24,6 +24,7 @@ interface Transaction {
   accountId: number;
   accountName: string | null;
   categorySource: string | null;
+  hidden: boolean;
   notes: string | null;
 }
 
@@ -101,6 +102,8 @@ export default function TransactionsContent() {
   const [editingNoteId, setEditingNoteId] = useState<number | null>(null);
   const [noteDraft, setNoteDraft] = useState("");
   const [generatingNoteId, setGeneratingNoteId] = useState<number | null>(null);
+  const [showHidden, setShowHidden] = useState(false);
+  const [hidingId, setHidingId] = useState<number | null>(null);
 
   const LIMIT = 50;
 
@@ -112,13 +115,30 @@ export default function TransactionsContent() {
     if (f.accountId) params.set("accountId", f.accountId);
     if (f.categoryId && f.categoryId !== "none") params.set("categoryId", f.categoryId);
     if (f.search) params.set("search", f.search);
+    if (showHidden) params.set("includeHidden", "1");
     const data = await fetch(`/api/transactions?${params}`).then((r) => r.json());
     let rows: Transaction[] = data.rows ?? [];
     if (f.categoryId === "none") rows = rows.filter((tx) => !tx.categoryId);
     setTransactions(rows);
     setTotal(data.total ?? 0);
     setLoading(false);
-  }, []);
+  }, [showHidden]);
+
+  async function toggleHidden(tx: Transaction) {
+    setHidingId(tx.id);
+    await fetch(`/api/transactions/${tx.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ hidden: !tx.hidden }),
+    });
+    setHidingId(null);
+    // If we're not showing hidden, the row disappears; otherwise just flip its state
+    if (!showHidden && !tx.hidden) {
+      setTransactions((prev) => prev.filter((t) => t.id !== tx.id));
+    } else {
+      setTransactions((prev) => prev.map((t) => t.id === tx.id ? { ...t, hidden: !t.hidden } : t));
+    }
+  }
 
   const fetchBatches = async () => {
     const data = await fetch("/api/import-batches").then((r) => r.json());
@@ -260,6 +280,12 @@ export default function TransactionsContent() {
               {bulkRunning ? "Categorizing…" : `✦ AI categorize ${uncategorizedCount}`}
             </button>
           )}
+          <button onClick={() => setShowHidden((s) => !s)} title="Toggle hidden transactions (e.g. GO+ internal legs)" style={{
+            padding: "7px 14px", borderRadius: 6, border: "1px solid var(--border-2)",
+            background: showHidden ? "var(--accent-dim)" : "var(--bg-3)", color: showHidden ? "var(--accent)" : "var(--text-muted)", fontSize: 12, cursor: "pointer", fontFamily: "inherit",
+          }}>
+            {showHidden ? "✓ Showing hidden" : "Show hidden"}
+          </button>
           <button onClick={() => setShowAdd(true)} style={{
             padding: "7px 14px", borderRadius: 6, border: "1px solid var(--border-2)",
             background: "var(--bg-3)", color: "var(--text)", fontSize: 12, cursor: "pointer", fontFamily: "inherit",
@@ -369,7 +395,7 @@ export default function TransactionsContent() {
                           background: isEditing ? "var(--accent-dim)" : isDeleting ? "var(--expense-dim)" : "transparent",
                           borderLeft: isEditing ? "3px solid var(--accent)" : "3px solid transparent",
                           transition: "background 0.15s, border-color 0.15s",
-                          opacity: isDeleting ? 0.5 : 1,
+                          opacity: isDeleting ? 0.5 : tx.hidden ? 0.45 : 1,
                         }}
                         onMouseEnter={(e) => !isEditing && (e.currentTarget.style.background = "var(--bg-3)")}
                         onMouseLeave={(e) => !isEditing && (e.currentTarget.style.background = "transparent")}
@@ -431,6 +457,7 @@ export default function TransactionsContent() {
                           <div style={{ display: "flex", gap: 4, opacity: 0, transition: "opacity 0.15s" }} className="row-actions">
                             <ActionBtn color="var(--accent)" title="Ask AI" onClick={() => { setAgentContext({ id: tx.id, description: tx.description, merchantNormalized: tx.merchantNormalized, amount: tx.amount, postedAt: tx.postedAt, categoryName: tx.categoryName, notes: tx.notes }); setAgentOpen(true); }}>✦</ActionBtn>
                             <ActionBtn color="var(--text-muted)" title="Edit" onClick={() => setEditingId(isEditing ? null : tx.id)}>✎</ActionBtn>
+                            <ActionBtn color="var(--text-muted)" title={tx.hidden ? "Unhide" : "Hide from list"} disabled={hidingId === tx.id} onClick={() => toggleHidden(tx)}>{tx.hidden ? "🚫" : "⊘"}</ActionBtn>
                             <ActionBtn color="var(--expense)" title="Delete" onClick={() => setConfirmDelete(tx)}>✕</ActionBtn>
                           </div>
                         </td>
