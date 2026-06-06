@@ -1,11 +1,41 @@
-➜  finance-tracker git:(main) npm run setup
+This is an environment issue, not a code bug — but let me check what's in the repo first so I can advise precisely.
 
-> finance-tracker@0.1.0 setup
-> ./scripts/setup.sh
+Ran
+Check for setup script and its contents
+That's not a bug in the script — it's the classic WSL-is-running-Windows-npm problem. Your setup.sh is fine; it never even got to run.
 
-'\\wsl.localhost\Ubuntu-24.04\home\kit-bryan\projects\finance-tracker'
-CMD.EXE was started with the above path as the current directory.
-UNC paths are not supported.  Defaulting to Windows directory.
-'.' is not recognized as an internal or external command,
-operable program or batch file.
-➜  finance-tracker git:(main) 
+What's actually happening
+Read the error signature:
+
+CMD.EXE was started with the above path...
+UNC paths are not supported. Defaulting to Windows directory.
+'.' is not recognized as an internal or external command
+When you run npm run setup inside WSL, the npm it found is Windows' npm.cmd (from /mnt/c/Program Files/nodejs/), not a Linux npm. Windows npm tries to run your script string ./scripts/setup.sh by spawning cmd.exe — which can't operate from a \\wsl.localhost\... path and doesn't understand ./scripts/setup.sh. Hence the gibberish.
+
+This happens because WSL appends the Windows PATH, and you have no Linux Node installed in Ubuntu, so the Windows one wins.
+
+Confirm it (in WSL)
+which npm node
+If those point to /mnt/c/..., that's the smoking gun.
+
+The fix — install Node natively in WSL Ubuntu
+Easiest, via nvm:
+
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
+exec $SHELL          # reload shell
+nvm install 20
+which npm            # should now be ~/.nvm/.../bin/npm  (a Linux path)
+Or via NodeSource (system-wide):
+
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs
+Then re-run:
+
+npm install
+npm run setup
+Two more things for that WSL machine
+Docker must be reachable from WSL — the script checks for it. In Docker Desktop: Settings → Resources → WSL Integration → enable for Ubuntu-24.04. Verify with docker info in WSL.
+Keep the project on the Linux filesystem — yours already is (/home/kit-bryan/projects/...), which is correct and fast. Don't move it under /mnt/c/.
+Once Linux Node is the one on your PATH, npm run setup will run setup.sh through bash and work the same as on your Mac.
+
+Want me to add a short "WSL / Windows" note to the README so this is documented for next time (install Node inside WSL, enable Docker WSL integration)?
