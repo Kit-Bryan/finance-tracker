@@ -6,6 +6,7 @@ import { transactions, importBatches } from "@/db/schema";
 import { categorizeByRules, isGoPlusNoise } from "@/lib/categorizer/rules";
 import { PreviewRow } from "@/app/api/parse-preview/route";
 import { combinePostedAt } from "@/lib/format";
+import { logger } from "@/lib/logger";
 
 interface ForceBody {
   batchId: number;
@@ -14,12 +15,14 @@ interface ForceBody {
 }
 
 export async function POST(req: NextRequest) {
+  const log = logger.child({ route: "import-force" });
   const { batchId, accountId, rows }: ForceBody = await req.json();
   if (!batchId || !accountId || !rows?.length) {
     return NextResponse.json({ error: "Missing fields" }, { status: 400 });
   }
 
   let imported = 0;
+  let failed = 0;
 
   for (const row of rows) {
     const catResult = await categorizeByRules(row.description);
@@ -47,8 +50,9 @@ export async function POST(req: NextRequest) {
         rawRow: { date: row.date, time: row.time, description: row.description, amount: row.amount },
       });
       imported++;
-    } catch {
-      // ignore
+    } catch (err) {
+      failed++;
+      log.error({ err, batchId, description: row.description }, "force-import row failed");
     }
   }
 
@@ -58,5 +62,6 @@ export async function POST(req: NextRequest) {
     await db.update(importBatches).set({ importedRows: (batch.importedRows ?? 0) + imported }).where(eq(importBatches.id, batchId));
   }
 
-  return NextResponse.json({ imported });
+  if (failed > 0) log.warn({ batchId, imported, failed }, "force-import completed with failures");
+  return NextResponse.json({ imported, failed });
 }
