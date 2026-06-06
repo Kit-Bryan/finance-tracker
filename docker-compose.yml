@@ -16,15 +16,31 @@ services:
       timeout: 5s
       retries: 5
 
+  # PDF → image rasterizer (poppler). Kept separate so poppler's system deps
+  # stay out of the Next.js app image.
+  pdf-renderer:
+    build: ./services/pdf-renderer
+    restart: unless-stopped
+    ports:
+      - "5001:5001"
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:5001/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
   app:
     build: .
     restart: unless-stopped
     depends_on:
       db:
         condition: service_healthy
+      pdf-renderer:
+        condition: service_started
     environment:
       DATABASE_URL: postgresql://finance:${POSTGRES_PASSWORD:-finance}@db:5432/finance
       APP_PASSWORD: ${APP_PASSWORD:-}
+      PDF_RENDERER_URL: http://pdf-renderer:5001
     ports:
       - "3000:3000"
     volumes:

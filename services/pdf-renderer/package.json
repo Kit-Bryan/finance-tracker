@@ -1,0 +1,10 @@
+{
+  "name": "pdf-renderer",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Poppler-backed PDF to PNG rasterizer for the finance tracker",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  }
+}
