@@ -27,5 +27,7 @@ export function getAIClient(): OpenAI {
   return _client;
 }
 
-// Default model: prefer a fast/cheap model; override via env
-export const DEFAULT_MODEL = process.env.AI_MODEL ?? "gpt-5.1";
+// Default model: gpt-5.4-mini — accurate on statement parsing (text + vision) and cheap.
+// (gpt-5.4-nano was tested and got transaction signs/amounts wrong, so it's avoided.)
+// Override via the AI_MODEL env var.
+export const DEFAULT_MODEL = process.env.AI_MODEL ?? "gpt-5.4-mini";

@@ -68,7 +68,7 @@ You'll be asked to confirm — this **replaces** all data in the current databas
 | `OPENAI_API_KEY` | Optional | If set, OpenAI is used directly and LiteLLM is ignored |
 | `APP_PASSWORD` | Optional | Local app password |
 
-*Not required if `OPENAI_API_KEY` is set. Default model: `gpt-5.1`.
+*Not required if `OPENAI_API_KEY` is set. Default model: `gpt-5.4-mini`.
 
 ---
 
