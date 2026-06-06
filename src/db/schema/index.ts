@@ -80,6 +80,7 @@ export const categories = pgTable("categories", {
   icon: varchar("icon", { length: 50 }),
   isTransfer: boolean("is_transfer").default(false),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+  deletedAt: timestamp("deleted_at"),
 });
 
 // ─── Transactions (canonical) ─────────────────────────────────────────────────
@@ -103,6 +104,7 @@ export const transactions = pgTable(
     categoryConfidence: numeric("category_confidence", { precision: 4, scale: 3 }),
     isTransfer: boolean("is_transfer").default(false),
     transferPairId: integer("transfer_pair_id"),
+    reimbursementForId: integer("reimbursement_for_id"), // links a repayment transfer back to the original group expense
     rawRow: jsonb("raw_row"),
     notes: text("notes"),
     deletedAt: timestamp("deleted_at"),
@@ -114,6 +116,29 @@ export const transactions = pgTable(
     fingerprintIdx: uniqueIndex("transactions_fingerprint_idx").on(t.fingerprint).where(sql`deleted_at IS NULL`),
     postedAtIdx: index("transactions_posted_at_idx").on(t.postedAt),
     accountIdx: index("transactions_account_idx").on(t.accountId),
+  })
+);
+
+// ─── Flags (proactive "needs attention" items) ───────────────────────────────
+
+export const flags = pgTable(
+  "flags",
+  {
+    id: serial("id").primaryKey(),
+    transactionId: integer("transaction_id")
+      .notNull()
+      .references(() => transactions.id),
+    type: varchar("type", { length: 40 }).notNull(), // reimbursement | low_confidence
+    severity: varchar("severity", { length: 20 }).notNull().default("info"), // info | warning
+    reason: text("reason").notNull(),
+    data: jsonb("data"), // type-specific payload (e.g. reimbursement candidate ids)
+    status: varchar("status", { length: 20 }).notNull().default("open"), // open | dismissed | resolved
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (t) => ({
+    txTypeIdx: index("flags_tx_type_idx").on(t.transactionId, t.type),
+    statusIdx: index("flags_status_idx").on(t.status),
   })
 );
 
