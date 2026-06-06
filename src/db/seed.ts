@@ -8,7 +8,7 @@ const STARTER_CATEGORIES = [
   {
     name: "Food & Drink",
     color: "#f97316",
-    children: ["Groceries", "Restaurants", "Coffee", "Alcohol"],
+    children: ["Groceries", "Restaurants", "Takeaway / Delivery"],
   },
   {
     name: "Transport",
