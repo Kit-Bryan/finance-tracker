@@ -21,6 +21,15 @@ export function reconstructLines(pages: BBoxPage[]): StatementLine[] {
     if (!page.words.length || !page.height) return;
 
     const words = [...page.words].sort((a, b) => a.yMin - b.yMin || a.xMin - b.xMin);
+
+    // Rotated pages: pdftotext mislabels the page as the unrotated MediaBox
+    // (e.g. 595×842 portrait) but emits word coordinates in the rendered/visual
+    // space (e.g. 842 wide × 595 tall) — which is also how pdftoppm renders the
+    // image. Detect that (words extend past the declared width) and normalize Y
+    // by the TRUE visual height so highlight positions match the displayed image.
+    const maxX = Math.max(...words.map((w) => w.xMax));
+    const visualHeight = maxX > page.width + 2 ? page.width : page.height;
+
     const heights = words.map((w) => w.yMax - w.yMin).filter((h) => h > 0).sort((a, b) => a - b);
     const medianH = heights.length ? heights[Math.floor(heights.length / 2)] : 8;
     const threshold = medianH * 0.6;
@@ -33,7 +42,7 @@ export function reconstructLines(pages: BBoxPage[]): StatementLine[] {
       const sorted = [...group].sort((a, b) => a.xMin - b.xMin);
       const text = sorted.map((w) => w.text).join(" ").replace(/\s+/g, " ").trim();
       const yc = group.reduce((s, w) => s + (w.yMin + w.yMax) / 2, 0) / group.length;
-      if (text) lines.push({ page: pageIdx, yPercent: Math.max(0, Math.min(1, yc / page.height)), text });
+      if (text) lines.push({ page: pageIdx, yPercent: Math.max(0, Math.min(1, yc / visualHeight)), text });
       group = [];
     };
 
