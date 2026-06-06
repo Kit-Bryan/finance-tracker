@@ -42,6 +42,10 @@ Bad examples (never do this):
 - "GrabPay payment (ref: xyz123abc)" — don't include refs
 - "FPX payment (ref: 2508151328240355)" — don't include refs
 
+Touch 'n Go GO+ direction (commonly misread — get this right):
+- "Quick Reload Payment (via GO+ Balance)" = money pulled OUT of GO+ into the eWallet to fund a payment (GO+ → eWallet). Note: "Funded from GO+ balance" — NEVER "reload to GO+" (opposite direction).
+- "eWallet Cash Out" / "Via eWallet to GO+" = money moved FROM the eWallet INTO GO+ (eWallet → GO+). Note: "Moved to GO+ balance".
+
 Return ONLY the note text or empty string, no quotes, no explanation.`;
 
   const resp = await ai.chat.completions.create({

@@ -58,6 +58,9 @@ Rules:
 - If amount > 0 (credit/income), prefer income-related categories
 - For transfers between own accounts, use "Transfer"
 - TOUCH 'N GO GO+ INTERNAL MOVEMENTS are NOT income or spending — categorize as "Transfer". This includes "Quick Reload Payment (via GO+ Balance)" and any internal GO+ routing/processing leg that only exists to fund another payment (it usually appears as a credit immediately matched by a same-amount merchant debit).
+- GO+ DIRECTION (commonly misread — get this right in the note):
+  • "Quick Reload Payment (via GO+ Balance)" = money pulled OUT of GO+ into the eWallet to fund a payment (GO+ → eWallet). Note it as "Funded from GO+ balance" — NEVER "reload to GO+" (that's the opposite direction).
+  • "eWallet Cash Out" / "Via eWallet to GO+" = money moved FROM the eWallet INTO GO+ savings (eWallet → GO+). Note it as "Moved to GO+ balance".
 - REAL TRANSFERS BETWEEN THE USER'S OWN ACCOUNTS/WALLETS are also "Transfer" and must always be kept (never dropped): e.g. Maybank → Touch 'n Go, Touch 'n Go → Maybank, bank-to-wallet top-ups, reloads funded "from [a bank/card]". These are real money movements but are neither income nor spending.
 - Do NOT blanket-classify every "Fund Transfer" as "Transfer": a transfer to/from another PERSON (a human name, e.g. an allowance or repayment) can be real income or a real expense — judge by context. Reserve "Transfer" for the user's OWN-account movements and GO+ internal legs.
 - Use "Treats & Meals" when a transaction is clearly paying for someone else's food/drinks (e.g. group dinners where one person pays). Use "Gifts" for presents, "Donations" for charities, "Tithe / Offering" for religious giving.
