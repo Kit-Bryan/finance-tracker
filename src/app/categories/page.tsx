@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { formatCurrency } from "@/lib/format";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { QK } from "@/lib/queryKeys";
 
 interface Cat {
   id: number;
@@ -27,29 +29,163 @@ type PickerMode =
 
 export default function CategoriesPage() {
   const router = useRouter();
-  const [cats, setCats] = useState<Cat[]>([]);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
+
   const [editingId, setEditingId] = useState<number | null>(null);
   const [draftName, setDraftName] = useState("");
   const [colorFor, setColorFor] = useState<number | null>(null);
-  const [busy, setBusy] = useState<number | null>(null);
   const [picker, setPicker] = useState<PickerMode | null>(null);
   const [creating, setCreating] = useState<null | { parentId: number | null }>(null);
   const [newName, setNewName] = useState("");
   const [search, setSearch] = useState("");
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
 
-  async function load() {
-    const d = await fetch("/api/categories/manage").then((r) => r.json());
-    setCats(d);
-    setLoading(false);
-  }
-  useEffect(() => { load(); }, []);
+  // ── Query ──────────────────────────────────────────────────────────────────
+
+  const { data: cats = [], isLoading: loading } = useQuery<Cat[]>({
+    queryKey: QK.categoriesManage(),
+    queryFn: () => fetch("/api/categories/manage").then((r) => r.json()),
+  });
+
+  // ── Mutations ──────────────────────────────────────────────────────────────
+
+  const renameMutation = useMutation({
+    mutationFn: ({ id, name }: { id: number; name: string }) =>
+      fetch(`/api/categories/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      }).then((r) => r.json()),
+    onMutate: async ({ id, name }) => {
+      await queryClient.cancelQueries({ queryKey: QK.categoriesManage() });
+      const prev = queryClient.getQueryData<Cat[]>(QK.categoriesManage());
+      queryClient.setQueryData<Cat[]>(QK.categoriesManage(), (old) =>
+        (old ?? []).map((c) => c.id === id ? { ...c, name } : c)
+      );
+      return { prev };
+    },
+    onError: (_e, _v, ctx) => {
+      if (ctx?.prev) queryClient.setQueryData(QK.categoriesManage(), ctx.prev);
+    },
+    onSettled: () => {
+      setEditingId(null);
+      queryClient.invalidateQueries({ queryKey: QK.categoriesManage() });
+    },
+  });
+
+  const recolorMutation = useMutation({
+    mutationFn: ({ id, color }: { id: number; color: string }) =>
+      fetch(`/api/categories/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ color }),
+      }).then((r) => r.json()),
+    onMutate: async ({ id, color }) => {
+      setColorFor(null);
+      await queryClient.cancelQueries({ queryKey: QK.categoriesManage() });
+      const prev = queryClient.getQueryData<Cat[]>(QK.categoriesManage());
+      queryClient.setQueryData<Cat[]>(QK.categoriesManage(), (old) =>
+        (old ?? []).map((c) => c.id === id ? { ...c, color } : c)
+      );
+      return { prev };
+    },
+    onError: (_e, _v, ctx) => {
+      if (ctx?.prev) queryClient.setQueryData(QK.categoriesManage(), ctx.prev);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: QK.categoriesManage() });
+    },
+  });
+
+  const createMutation = useMutation({
+    mutationFn: ({ name, parentId }: { name: string; parentId: number | null }) =>
+      fetch("/api/categories", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, parentId }),
+      }).then((r) => r.json()),
+    onSuccess: () => {
+      setCreating(null);
+      setNewName("");
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: QK.categoriesManage() });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (cat: Cat) => {
+      const res = await fetch(`/api/categories/${cat.id}`, { method: "DELETE" });
+      if (res.status === 409) {
+        const data = await res.json();
+        return { conflict: true, count: data.count, cat };
+      }
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error ?? "Could not delete");
+      }
+      return { conflict: false };
+    },
+    onSuccess: (result) => {
+      if (result.conflict && result.cat) {
+        setPicker({ kind: "resolve", source: result.cat, count: result.count });
+      }
+    },
+    onError: (err: Error) => {
+      alert(err.message);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: QK.categoriesManage() });
+    },
+  });
+
+  const mergeMutation = useMutation({
+    mutationFn: ({ sourceId, targetId }: { sourceId: number; targetId: number }) =>
+      fetch("/api/categories/merge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sourceId, targetId }),
+      }).then((r) => r.json()),
+    onSuccess: () => {
+      setPicker(null);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: QK.categoriesManage() });
+    },
+  });
+
+  const moveToParentMutation = useMutation({
+    mutationFn: ({ id, parentId }: { id: number; parentId: number }) =>
+      fetch(`/api/categories/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ parentId }),
+      }).then((r) => r.json()),
+    onSuccess: () => {
+      setPicker(null);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: QK.categoriesManage() });
+    },
+  });
+
+  const makeTopLevelMutation = useMutation({
+    mutationFn: (id: number) =>
+      fetch(`/api/categories/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ parentId: null }),
+      }).then((r) => r.json()),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: QK.categoriesManage() });
+    },
+  });
+
+  // ── Derived ────────────────────────────────────────────────────────────────
 
   const parents = cats.filter((c) => !c.parentId).sort((a, b) => a.name.localeCompare(b.name));
   const childrenOf = (id: number) => cats.filter((c) => c.parentId === id).sort((a, b) => a.name.localeCompare(b.name));
 
-  // Roll up a parent's own + children's stats for the collapsed overview
   function rollup(parent: Cat) {
     const kids = childrenOf(parent.id);
     const count = parent.txCount + kids.reduce((s, k) => s + k.txCount, 0);
@@ -70,46 +206,48 @@ export default function CategoriesPage() {
   const expandAll = () => setExpanded(new Set(parents.map((p) => p.id)));
   const collapseAll = () => setExpanded(new Set());
 
-  async function rename(id: number) {
+  // ── Handlers ──────────────────────────────────────────────────────────────
+
+  function rename(id: number) {
     if (!draftName.trim()) { setEditingId(null); return; }
-    setBusy(id);
-    await fetch(`/api/categories/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: draftName.trim() }) });
-    setEditingId(null); setBusy(null); load();
+    renameMutation.mutate({ id, name: draftName.trim() });
   }
-  async function recolor(id: number, color: string) {
-    setColorFor(null); setBusy(id);
-    await fetch(`/api/categories/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ color }) });
-    setBusy(null); load();
+
+  function recolor(id: number, color: string) {
+    recolorMutation.mutate({ id, color });
   }
-  async function create() {
+
+  function create() {
     if (!newName.trim() || !creating) return;
-    setBusy(-1);
-    await fetch("/api/categories", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: newName.trim(), parentId: creating.parentId }) });
-    setCreating(null); setNewName(""); setBusy(null); load();
+    createMutation.mutate({ name: newName.trim(), parentId: creating.parentId });
   }
-  async function del(cat: Cat) {
-    setBusy(cat.id);
-    const res = await fetch(`/api/categories/${cat.id}`, { method: "DELETE" });
-    setBusy(null);
-    if (res.status === 409) { const data = await res.json(); setPicker({ kind: "resolve", source: cat, count: data.count }); return; }
-    if (!res.ok) { const data = await res.json().catch(() => ({})); alert(data.error ?? "Could not delete"); return; }
-    load();
+
+  function del(cat: Cat) {
+    deleteMutation.mutate(cat);
   }
+
   async function doPick(target: Cat) {
     if (!picker) return;
-    setBusy(picker.kind === "move" ? picker.cat.id : picker.source.id);
     if (picker.kind === "move") {
-      await fetch(`/api/categories/${picker.cat.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ parentId: target.id }) });
+      moveToParentMutation.mutate({ id: picker.cat.id, parentId: target.id });
     } else {
-      await fetch("/api/categories/merge", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sourceId: picker.source.id, targetId: target.id }) });
+      mergeMutation.mutate({ sourceId: picker.source.id, targetId: target.id });
     }
-    setPicker(null); setBusy(null); load();
   }
-  async function makeTopLevel(cat: Cat) {
-    setBusy(cat.id);
-    await fetch(`/api/categories/${cat.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ parentId: null }) });
-    setBusy(null); load();
+
+  function makeTopLevel(cat: Cat) {
+    makeTopLevelMutation.mutate(cat.id);
   }
+
+  // busy state — track which id has a pending mutation
+  const busyId = (
+    renameMutation.isPending ? (renameMutation.variables as { id: number }).id :
+    recolorMutation.isPending ? (recolorMutation.variables as { id: number }).id :
+    deleteMutation.isPending ? (deleteMutation.variables as Cat).id :
+    makeTopLevelMutation.isPending ? makeTopLevelMutation.variables :
+    createMutation.isPending ? -1 :
+    null
+  );
 
   // Which parents to render, honoring search
   const visibleParents = parents.filter((p) => {
@@ -152,7 +290,7 @@ export default function CategoriesPage() {
             return (
               <div key={parent.id} style={{ background: "var(--bg-2)", border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden" }}>
                 {/* Parent header */}
-                <div className="cat-row" style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", opacity: busy === parent.id ? 0.5 : 1 }}>
+                <div className="cat-row" style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", opacity: busyId === parent.id ? 0.5 : 1 }}>
                   <button onClick={() => toggle(parent.id)} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 11, width: 16, flexShrink: 0 }}>
                     {isOpen ? "▼" : "▶"}
                   </button>
@@ -175,7 +313,7 @@ export default function CategoriesPage() {
 
                 {/* Children */}
                 {isOpen && shownKids.map((kid) => (
-                  <div key={kid.id} className="cat-row" style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px 10px 42px", borderTop: "1px solid var(--border)", background: "var(--bg)", opacity: busy === kid.id ? 0.5 : 1 }}>
+                  <div key={kid.id} className="cat-row" style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px 10px 42px", borderTop: "1px solid var(--border)", background: "var(--bg)", opacity: busyId === kid.id ? 0.5 : 1 }}>
                     <ColorSwatch cat={kid} open={colorFor === kid.id} onOpen={() => setColorFor(colorFor === kid.id ? null : kid.id)} onPick={(c) => recolor(kid.id, c)} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       {editingId === kid.id ? (
@@ -198,7 +336,7 @@ export default function CategoriesPage() {
                 {isOpen && creating?.parentId === parent.id && (
                   <div style={{ borderTop: "1px solid var(--border)", padding: "10px 16px 10px 42px", display: "flex", gap: 8, background: "var(--bg)" }}>
                     <input autoFocus value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && create()} placeholder="Subcategory name…" style={inputStyle} />
-                    <button onClick={create} disabled={busy === -1} style={primaryBtn(busy === -1)}>Add</button>
+                    <button onClick={create} disabled={createMutation.isPending} style={primaryBtn(createMutation.isPending)}>Add</button>
                     <button onClick={() => setCreating(null)} style={ghostBtn}>Cancel</button>
                   </div>
                 )}
@@ -210,13 +348,13 @@ export default function CategoriesPage() {
           {creating?.parentId === null && (
             <div style={{ background: "var(--bg-2)", border: "1px solid var(--accent)", borderRadius: 8, padding: "12px 16px", display: "flex", gap: 8 }}>
               <input autoFocus value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && create()} placeholder="Category name…" style={inputStyle} />
-              <button onClick={create} disabled={busy === -1} style={primaryBtn(busy === -1)}>Add</button>
+              <button onClick={create} disabled={createMutation.isPending} style={primaryBtn(createMutation.isPending)}>Add</button>
               <button onClick={() => setCreating(null)} style={ghostBtn}>Cancel</button>
             </div>
           )}
 
           {visibleParents.length === 0 && (
-            <div style={{ padding: 40, textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>No categories match “{search}”.</div>
+            <div style={{ padding: 40, textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>No categories match "{search}".</div>
           )}
         </div>
       )}

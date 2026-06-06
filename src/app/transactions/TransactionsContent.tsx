@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { formatCurrency, startOfMonth, today, formatTxDate, formatTxTime } from "@/lib/format";
 import ReviewQueue from "@/components/ReviewQueue";
@@ -9,6 +9,12 @@ import CategoryCombobox, { CategoryValue } from "@/components/CategoryCombobox";
 import FilterCategoryCombobox from "@/components/FilterCategoryCombobox";
 import TransactionEditPanel from "@/components/TransactionEditPanel";
 import ConfirmDialog from "@/components/ConfirmDialog";
+import {
+  useQuery,
+  useMutation,
+  useQueryClient,
+} from "@tanstack/react-query";
+import { QK } from "@/lib/queryKeys";
 
 interface Transaction {
   id: number;
@@ -55,6 +61,11 @@ interface ImportBatch {
   bank: string | null;
 }
 
+interface TxListData {
+  rows: Transaction[];
+  total: number;
+}
+
 const selectStyle: React.CSSProperties = {
   background: "var(--bg-3)", border: "1px solid var(--border-2)", borderRadius: 5,
   color: "var(--text)", fontSize: 13, padding: "6px 10px", outline: "none", fontFamily: "inherit",
@@ -67,15 +78,11 @@ export default function TransactionsContent() {
   const toParam = searchParams.get("to");
   const categoryIdParam = searchParams.get("categoryId");
 
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [accounts, setAccounts] = useState<Account[]>([]);
-  const [batches, setBatches] = useState<ImportBatch[]>([]);
-  const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(1);
-  const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<"list" | "history" | "trash">("list");
+  const queryClient = useQueryClient();
 
+  // ── UI state (kept as local state) ────────────────────────────────────────
+  const [page, setPage] = useState(1);
+  const [tab, setTab] = useState<"list" | "history" | "trash">("list");
   const [filters, setFilters] = useState({
     from: fromParam || startOfMonth(),
     to: toParam || today(),
@@ -83,73 +90,86 @@ export default function TransactionsContent() {
     categoryId: filterParam === "uncategorized" ? "none" : (categoryIdParam || ""),
     search: "",
   });
-  // Separate typed value so we can debounce before triggering a fetch
   const [searchInput, setSearchInput] = useState(filters.search);
+  const [showHidden, setShowHidden] = useState(false);
 
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [savingId, setSavingId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Transaction | null>(null);
-  const [bulkRunning, setBulkRunning] = useState(false);
   const [bulkResult, setBulkResult] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
-  const [deletingBatch, setDeletingBatch] = useState<number | null>(null);
   const [agentOpen, setAgentOpen] = useState(false);
   const [agentContext, setAgentContext] = useState<ContextTransaction | null>(null);
-  const [trashItems, setTrashItems] = useState<TrashItem[]>([]);
-  const [trashLoading, setTrashLoading] = useState(false);
-  const [restoringId, setRestoringId] = useState<number | null>(null);
-  const [purgingId, setPurgingId] = useState<number | null>(null);
-  const [emptyingTrash, setEmptyingTrash] = useState(false);
   const [expandedDescriptions, setExpandedDescriptions] = useState<Set<number>>(new Set());
   const [editingNoteId, setEditingNoteId] = useState<number | null>(null);
   const [noteDraft, setNoteDraft] = useState("");
   const [generatingNoteId, setGeneratingNoteId] = useState<number | null>(null);
-  const [showHidden, setShowHidden] = useState(false);
-  const [hidingId, setHidingId] = useState<number | null>(null);
 
   const LIMIT = 50;
 
-  const fetchAll = useCallback(async (f: typeof filters, p: number) => {
-    setLoading(true);
-    const params = new URLSearchParams({ limit: String(LIMIT), page: String(p) });
-    if (f.from) params.set("from", f.from);
-    if (f.to) params.set("to", f.to);
-    if (f.accountId) params.set("accountId", f.accountId);
-    if (f.categoryId) params.set("categoryId", f.categoryId); // "none" → server filters categoryId IS NULL
-    if (f.search) params.set("search", f.search);
-    if (showHidden) params.set("includeHidden", "1");
-    const data = await fetch(`/api/transactions?${params}`).then((r) => r.json());
-    const rows: Transaction[] = data.rows ?? [];
-    setTransactions(rows);
-    setTotal(data.total ?? 0);
-    setLoading(false);
-  }, [showHidden]);
+  // Build query key params object
+  const txFilterParams: Record<string, string | number | boolean> = {
+    page,
+    limit: LIMIT,
+    ...(filters.from ? { from: filters.from } : {}),
+    ...(filters.to ? { to: filters.to } : {}),
+    ...(filters.accountId ? { accountId: filters.accountId } : {}),
+    ...(filters.categoryId ? { categoryId: filters.categoryId } : {}),
+    ...(filters.search ? { search: filters.search } : {}),
+    ...(showHidden ? { includeHidden: true } : {}),
+  };
+  const txKey = QK.transactions(txFilterParams);
 
-  async function hideGoPlusNoise() {
-    const res = await fetch("/api/transactions/hide-noise", { method: "POST" });
-    const data = await res.json();
-    setBulkResult(data.hidden > 0 ? `Hid ${data.hidden} GO+ internal leg${data.hidden !== 1 ? "s" : ""}` : "No GO+ noise found to hide");
-    fetchAll(filters, page);
-  }
+  // ── Queries ───────────────────────────────────────────────────────────────
 
-  async function toggleHidden(tx: Transaction) {
-    setHidingId(tx.id);
-    await fetch(`/api/transactions/${tx.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ hidden: !tx.hidden }),
-    });
-    setHidingId(null);
-    // If we're not showing hidden, the row disappears; otherwise just flip its state
-    if (!showHidden && !tx.hidden) {
-      setTransactions((prev) => prev.filter((t) => t.id !== tx.id));
-    } else {
-      setTransactions((prev) => prev.map((t) => t.id === tx.id ? { ...t, hidden: !t.hidden } : t));
-    }
-  }
+  const { data: txData, isLoading: loading } = useQuery<TxListData>({
+    queryKey: txKey,
+    queryFn: async () => {
+      const params = new URLSearchParams({ limit: String(LIMIT), page: String(page) });
+      if (filters.from) params.set("from", filters.from);
+      if (filters.to) params.set("to", filters.to);
+      if (filters.accountId) params.set("accountId", filters.accountId);
+      if (filters.categoryId) params.set("categoryId", filters.categoryId);
+      if (filters.search) params.set("search", filters.search);
+      if (showHidden) params.set("includeHidden", "1");
+      return fetch(`/api/transactions?${params}`).then((r) => r.json());
+    },
+  });
 
-  // Cmd+K / Ctrl+K → open agent chat
+  const { data: categories = [] } = useQuery<Category[]>({
+    queryKey: QK.categories(),
+    queryFn: () => fetch("/api/categories").then((r) => r.json()),
+  });
+
+  const { data: accounts = [] } = useQuery<Account[]>({
+    queryKey: QK.accounts(),
+    queryFn: () => fetch("/api/accounts").then((r) => r.json()),
+  });
+
+  const { data: batches = [] } = useQuery<ImportBatch[]>({
+    queryKey: QK.batches(),
+    queryFn: () => fetch("/api/import-batches").then((r) => r.json()),
+  });
+
+  const { data: trashItems = [], isLoading: trashLoading } = useQuery<TrashItem[]>({
+    queryKey: QK.trash(),
+    queryFn: () => fetch("/api/trash").then((r) => r.json()),
+    enabled: tab === "trash",
+  });
+
+  const transactions = txData?.rows ?? [];
+  const total = txData?.total ?? 0;
+
+  // ── Debounce search ────────────────────────────────────────────────────────
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setFilters((f) => ({ ...f, search: searchInput }));
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [searchInput]);
+
+  // ── Cmd+K / Ctrl+K → open agent chat ──────────────────────────────────────
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
@@ -161,121 +181,289 @@ export default function TransactionsContent() {
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
-  const fetchBatches = async () => {
-    const data = await fetch("/api/import-batches").then((r) => r.json());
-    setBatches(data);
-  };
+  // ── Mutations ─────────────────────────────────────────────────────────────
 
-  const fetchTrash = async () => {
-    setTrashLoading(true);
-    const data = await fetch("/api/trash").then((r) => r.json());
-    setTrashItems(data);
-    setTrashLoading(false);
-  };
+  const deleteTransactionMutation = useMutation({
+    mutationFn: (id: number) =>
+      fetch(`/api/transactions/${id}`, { method: "DELETE" }).then((r) => r.json()),
+    onMutate: async (id) => {
+      setDeletingId(id);
+      await queryClient.cancelQueries({ queryKey: ['transactions'] });
+      const prev = queryClient.getQueryData<TxListData>(txKey);
+      queryClient.setQueryData<TxListData>(txKey, (old) => {
+        if (!old) return old;
+        return {
+          ...old,
+          rows: old.rows.filter((t) => t.id !== id),
+          total: (old.total ?? 0) - 1,
+        };
+      });
+      return { prev };
+    },
+    onError: (_e, _id, ctx) => {
+      if (ctx?.prev) queryClient.setQueryData(txKey, ctx.prev);
+    },
+    onSettled: () => {
+      setDeletingId(null);
+      queryClient.invalidateQueries({ queryKey: ['transactions'] });
+    },
+  });
 
-  async function saveNote(txId: number, note: string) {
-    await fetch(`/api/transactions/${txId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ notes: note }),
-    });
-    setEditingNoteId(null);
-    // Update local state — no full re-fetch, no scroll jump
-    setTransactions((prev) => prev.map((t) => t.id === txId ? { ...t, notes: note } : t));
-  }
+  const restoreTransactionMutation = useMutation({
+    mutationFn: (id: number) =>
+      fetch(`/api/trash/${id}`, { method: "POST" }).then((r) => r.json()),
+    onMutate: async (id) => {
+      await queryClient.cancelQueries({ queryKey: QK.trash() });
+      const prev = queryClient.getQueryData<TrashItem[]>(QK.trash());
+      queryClient.setQueryData<TrashItem[]>(QK.trash(), (old) =>
+        (old ?? []).filter((t) => t.id !== id)
+      );
+      return { prev };
+    },
+    onError: (_e, _id, ctx) => {
+      if (ctx?.prev) queryClient.setQueryData(QK.trash(), ctx.prev);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: QK.trash() });
+      queryClient.invalidateQueries({ queryKey: ['transactions'] });
+    },
+  });
 
-  async function generateNote(txId: number) {
-    setGeneratingNoteId(txId);
-    const res = await fetch(`/api/transactions/${txId}/note`, { method: "POST" });
-    const data = await res.json();
-    setGeneratingNoteId(null);
-    // Update local state only
-    setTransactions((prev) => prev.map((t) => t.id === txId ? { ...t, notes: data.note ?? t.notes } : t));
-  }
+  const permanentDeleteMutation = useMutation({
+    mutationFn: (id: number) =>
+      fetch(`/api/trash/${id}`, { method: "DELETE" }).then((r) => r.json()),
+    onMutate: async (id) => {
+      await queryClient.cancelQueries({ queryKey: QK.trash() });
+      const prev = queryClient.getQueryData<TrashItem[]>(QK.trash());
+      queryClient.setQueryData<TrashItem[]>(QK.trash(), (old) =>
+        (old ?? []).filter((t) => t.id !== id)
+      );
+      return { prev };
+    },
+    onError: (_e, _id, ctx) => {
+      if (ctx?.prev) queryClient.setQueryData(QK.trash(), ctx.prev);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: QK.trash() });
+    },
+  });
 
-  async function restoreTransaction(txId: number) {
-    setRestoringId(txId);
-    await fetch(`/api/trash/${txId}`, { method: "POST" });
-    setRestoringId(null);
-    setTrashItems((prev) => prev.filter((t) => t.id !== txId));
-    fetchAll(filters, page);
-  }
+  const emptyTrashMutation = useMutation({
+    mutationFn: () =>
+      fetch("/api/trash", { method: "DELETE" }).then((r) => r.json()),
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey: QK.trash() });
+      const prev = queryClient.getQueryData<TrashItem[]>(QK.trash());
+      queryClient.setQueryData<TrashItem[]>(QK.trash(), []);
+      return { prev };
+    },
+    onError: (_e, _v, ctx) => {
+      if (ctx?.prev) queryClient.setQueryData(QK.trash(), ctx.prev);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: QK.trash() });
+    },
+  });
 
-  async function permanentlyDelete(txId: number) {
-    if (!confirm("Permanently delete this transaction? This cannot be undone.")) return;
-    setPurgingId(txId);
-    await fetch(`/api/trash/${txId}`, { method: "DELETE" });
-    setPurgingId(null);
-    setTrashItems((prev) => prev.filter((t) => t.id !== txId));
-  }
+  const toggleHiddenMutation = useMutation({
+    mutationFn: ({ id, hidden }: { id: number; hidden: boolean }) =>
+      fetch(`/api/transactions/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ hidden }),
+      }).then((r) => r.json()),
+    onMutate: async ({ id, hidden }) => {
+      await queryClient.cancelQueries({ queryKey: txKey });
+      const prev = queryClient.getQueryData<TxListData>(txKey);
+      queryClient.setQueryData<TxListData>(txKey, (old) => {
+        if (!old) return old;
+        return {
+          ...old,
+          rows: showHidden
+            ? old.rows.map((t) => t.id === id ? { ...t, hidden } : t)
+            : old.rows.filter((t) => t.id !== id),
+        };
+      });
+      return { prev };
+    },
+    onError: (_e, _v, ctx) => {
+      if (ctx?.prev) queryClient.setQueryData(txKey, ctx.prev);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['transactions'] });
+    },
+  });
 
-  async function emptyTrash() {
-    if (!confirm(`Permanently delete all ${trashItems.length} transaction${trashItems.length !== 1 ? "s" : ""} in trash? This cannot be undone.`)) return;
-    setEmptyingTrash(true);
-    await fetch("/api/trash", { method: "DELETE" });
-    setEmptyingTrash(false);
-    setTrashItems([]);
-  }
+  const updateNoteMutation = useMutation({
+    mutationFn: ({ txId, note }: { txId: number; note: string }) =>
+      fetch(`/api/transactions/${txId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ notes: note }),
+      }).then((r) => r.json()),
+    onMutate: async ({ txId, note }) => {
+      setEditingNoteId(null);
+      await queryClient.cancelQueries({ queryKey: txKey });
+      const prev = queryClient.getQueryData<TxListData>(txKey);
+      queryClient.setQueryData<TxListData>(txKey, (old) => {
+        if (!old) return old;
+        return {
+          ...old,
+          rows: old.rows.map((t) => t.id === txId ? { ...t, notes: note } : t),
+        };
+      });
+      return { prev };
+    },
+    onError: (_e, _v, ctx) => {
+      if (ctx?.prev) queryClient.setQueryData(txKey, ctx.prev);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['transactions'] });
+    },
+  });
 
-  useEffect(() => {
-    Promise.all([
-      fetch("/api/categories").then((r) => r.json()),
-      fetch("/api/accounts").then((r) => r.json()),
-    ]).then(([cats, accs]) => { setCategories(cats); setAccounts(accs); });
-    fetchBatches();
-  }, []);
+  const generateNoteMutation = useMutation({
+    mutationFn: (txId: number) =>
+      fetch(`/api/transactions/${txId}/note`, { method: "POST" }).then((r) => r.json()),
+    onMutate: (txId) => {
+      setGeneratingNoteId(txId);
+    },
+    onSuccess: (data, txId) => {
+      queryClient.setQueryData<TxListData>(txKey, (old) => {
+        if (!old) return old;
+        return {
+          ...old,
+          rows: old.rows.map((t) => t.id === txId ? { ...t, notes: data.note ?? t.notes } : t),
+        };
+      });
+    },
+    onSettled: () => {
+      setGeneratingNoteId(null);
+      queryClient.invalidateQueries({ queryKey: ['transactions'] });
+    },
+  });
 
-  // Debounce search input → filters.search (300 ms)
-  useEffect(() => {
-    const t = setTimeout(() => {
-      setFilters((f) => ({ ...f, search: searchInput }));
-      setPage(1);
-    }, 300);
-    return () => clearTimeout(t);
-  }, [searchInput]);
+  const updateCategoryMutation = useMutation({
+    mutationFn: ({ id, categoryId, categorySource }: { id: number; categoryId: number | null; categorySource: string }) =>
+      fetch(`/api/transactions/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ categoryId, categorySource }),
+      }).then((r) => r.json()),
+    onMutate: async ({ id, categoryId }) => {
+      await queryClient.cancelQueries({ queryKey: txKey });
+      const prev = queryClient.getQueryData<TxListData>(txKey);
+      // Find matching category for display
+      const cat = categories.find((c) => c.id === categoryId);
+      queryClient.setQueryData<TxListData>(txKey, (old) => {
+        if (!old) return old;
+        return {
+          ...old,
+          rows: old.rows.map((t) =>
+            t.id === id
+              ? {
+                  ...t,
+                  categoryId: categoryId,
+                  categoryName: cat?.name ?? null,
+                  categoryColor: cat?.color ?? null,
+                }
+              : t
+          ),
+        };
+      });
+      return { prev };
+    },
+    onError: (_e, _v, ctx) => {
+      if (ctx?.prev) queryClient.setQueryData(txKey, ctx.prev);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['transactions'] });
+    },
+  });
 
-  useEffect(() => { fetchAll(filters, page); }, [filters, page, fetchAll]);
+  const bulkCategorizeMutation = useMutation({
+    mutationFn: () =>
+      fetch("/api/transactions/bulk-categorize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      }).then((r) => r.json()),
+    onSuccess: (data) => {
+      setBulkResult(`Categorized ${data.updated} of ${data.total} transactions`);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['transactions'] });
+    },
+  });
+
+  const deleteBatchMutation = useMutation({
+    mutationFn: (batchId: number) =>
+      fetch(`/api/import-batches/${batchId}`, { method: "DELETE" }).then((r) => r.json()),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: QK.batches() });
+      queryClient.invalidateQueries({ queryKey: ['transactions'] });
+    },
+  });
+
+  const addTransactionMutation = useMutation({
+    mutationFn: (body: Record<string, unknown>) =>
+      fetch("/api/transactions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }).then((r) => r.json()),
+    onSuccess: () => {
+      setShowAdd(false);
+      queryClient.invalidateQueries({ queryKey: ['transactions'] });
+    },
+  });
+
+  // ── Derived ───────────────────────────────────────────────────────────────
 
   const parentCats = categories.filter((c) => !c.parentId);
   const childrenOf = (pid: number) => categories.filter((c) => c.parentId === pid);
-
-  function handleEditSaved() {
-    setEditingId(null);
-    fetchAll(filters, page);
-  }
-
-  async function confirmDeleteTransaction() {
-    if (!confirmDelete) return;
-    setDeletingId(confirmDelete.id);
-    setConfirmDelete(null);
-    await fetch(`/api/transactions/${confirmDelete.id}`, { method: "DELETE" });
-    setDeletingId(null);
-    fetchAll(filters, page);
-  }
-
-  async function bulkCategorize() {
-    setBulkRunning(true);
-    setBulkResult(null);
-    const res = await fetch("/api/transactions/bulk-categorize", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
-    const data = await res.json();
-    setBulkResult(`Categorized ${data.updated} of ${data.total} transactions`);
-    setBulkRunning(false);
-    fetchAll(filters, page);
-  }
-
-  async function deleteBatch(batchId: number) {
-    if (!confirm("Delete this import and all its transactions? This cannot be undone.")) return;
-    setDeletingBatch(batchId);
-    await fetch(`/api/import-batches/${batchId}`, { method: "DELETE" });
-    setDeletingBatch(null);
-    fetchBatches();
-    fetchAll(filters, page);
-  }
 
   const uncategorizedCount = transactions.filter((tx) => !tx.categoryId).length;
   const totalExpense = transactions.filter((t) => parseFloat(t.amount) < 0).reduce((s, t) => s + parseFloat(t.amount), 0);
   const totalIncome = transactions.filter((t) => parseFloat(t.amount) > 0).reduce((s, t) => s + parseFloat(t.amount), 0);
   const totalPages = Math.ceil(total / LIMIT);
+
+  // ── Handlers ──────────────────────────────────────────────────────────────
+
+  async function hideGoPlusNoise() {
+    const res = await fetch("/api/transactions/hide-noise", { method: "POST" });
+    const data = await res.json();
+    setBulkResult(data.hidden > 0 ? `Hid ${data.hidden} GO+ internal leg${data.hidden !== 1 ? "s" : ""}` : "No GO+ noise found to hide");
+    queryClient.invalidateQueries({ queryKey: ['transactions'] });
+  }
+
+  function handleEditSaved() {
+    setEditingId(null);
+    queryClient.invalidateQueries({ queryKey: ['transactions'] });
+  }
+
+  function confirmDeleteTransaction() {
+    if (!confirmDelete) return;
+    setConfirmDelete(null);
+    deleteTransactionMutation.mutate(confirmDelete.id);
+  }
+
+  function permanentlyDelete(txId: number) {
+    if (!confirm("Permanently delete this transaction? This cannot be undone.")) return;
+    permanentDeleteMutation.mutate(txId);
+  }
+
+  function emptyTrash() {
+    if (!confirm(`Permanently delete all ${trashItems.length} transaction${trashItems.length !== 1 ? "s" : ""} in trash? This cannot be undone.`)) return;
+    emptyTrashMutation.mutate();
+  }
+
+  function deleteBatch(batchId: number) {
+    if (!confirm("Delete this import and all its transactions? This cannot be undone.")) return;
+    deleteBatchMutation.mutate(batchId);
+  }
+
+  // ── Render ────────────────────────────────────────────────────────────────
 
   return (
     <div style={{ padding: "32px 36px", maxWidth: 1200, margin: "0 auto" }}>
@@ -293,12 +481,12 @@ export default function TransactionsContent() {
             </div>
           )}
           {uncategorizedCount > 0 && (
-            <button onClick={bulkCategorize} disabled={bulkRunning} style={{
+            <button onClick={() => bulkCategorizeMutation.mutate()} disabled={bulkCategorizeMutation.isPending} style={{
               padding: "7px 14px", borderRadius: 6, border: "1px solid #c9a84c44",
               background: "var(--accent-dim)", color: "var(--accent)", fontSize: 12,
-              cursor: bulkRunning ? "wait" : "pointer", fontFamily: "inherit",
+              cursor: bulkCategorizeMutation.isPending ? "wait" : "pointer", fontFamily: "inherit",
             }}>
-              {bulkRunning ? "Categorizing…" : `✦ AI categorize ${uncategorizedCount}`}
+              {bulkCategorizeMutation.isPending ? "Categorizing…" : `✦ AI categorize ${uncategorizedCount}`}
             </button>
           )}
           <button onClick={hideGoPlusNoise} title="Hide all GO+ internal legs (Quick Reload / Cash Out) already imported" style={{
@@ -338,14 +526,16 @@ export default function TransactionsContent() {
       {/* Review Queue */}
       <ReviewQueue
         categories={categories}
-        onResolved={() => fetchAll(filters, page)}
-        onCategoryCreated={(cat) => setCategories((prev) => [...prev, cat])}
+        onResolved={() => queryClient.invalidateQueries({ queryKey: ['transactions'] })}
+        onCategoryCreated={(cat) => {
+          queryClient.setQueryData<Category[]>(QK.categories(), (old) => [...(old ?? []), cat]);
+        }}
       />
 
       {/* Tabs */}
       <div style={{ display: "flex", gap: 0, marginBottom: 16, borderBottom: "1px solid var(--border)" }}>
         {(["list", "history", "trash"] as const).map((t) => (
-          <button key={t} onClick={() => { setTab(t); if (t === "trash") fetchTrash(); }} style={{
+          <button key={t} onClick={() => setTab(t)} style={{
             padding: "8px 18px", background: "none", border: "none",
             borderBottom: tab === t ? "2px solid var(--accent)" : "2px solid transparent",
             color: tab === t ? "var(--accent)" : "var(--text-muted)",
@@ -410,8 +600,8 @@ export default function TransactionsContent() {
                     const isIncome = amt > 0;
                     const isEditing = editingId === tx.id;
                     const isDeleting = deletingId === tx.id;
+                    const isHiding = toggleHiddenMutation.isPending && toggleHiddenMutation.variables?.id === tx.id;
                     const displayName = tx.merchantNormalized || tx.description;
-
                     const isExpanded = expandedDescriptions.has(tx.id);
 
                     return (
@@ -484,7 +674,7 @@ export default function TransactionsContent() {
                           <div style={{ display: "flex", gap: 4, transition: "opacity 0.15s" }} className="row-actions">
                             <ActionBtn color="var(--accent)" title="Ask AI" onClick={() => { setAgentContext({ id: tx.id, description: tx.description, merchantNormalized: tx.merchantNormalized, amount: tx.amount, postedAt: tx.postedAt, categoryName: tx.categoryName, notes: tx.notes }); setAgentOpen(true); }}>✦</ActionBtn>
                             <ActionBtn color="var(--text-muted)" title="Edit" onClick={() => setEditingId(isEditing ? null : tx.id)}>✎</ActionBtn>
-                            <ActionBtn color="var(--text-muted)" title={tx.hidden ? "Unhide" : "Hide from list"} disabled={hidingId === tx.id} onClick={() => toggleHidden(tx)}>{tx.hidden ? "🚫" : "⊘"}</ActionBtn>
+                            <ActionBtn color="var(--text-muted)" title={tx.hidden ? "Unhide" : "Hide from list"} disabled={isHiding} onClick={() => toggleHiddenMutation.mutate({ id: tx.id, hidden: !tx.hidden })}>{tx.hidden ? "🚫" : "⊘"}</ActionBtn>
                             <ActionBtn color="var(--expense)" title="Delete" onClick={() => setConfirmDelete(tx)}>✕</ActionBtn>
                           </div>
                         </td>
@@ -542,11 +732,11 @@ export default function TransactionsContent() {
                     <td style={{ padding: "12px 16px" }}>
                       <button
                         onClick={() => deleteBatch(b.id)}
-                        disabled={deletingBatch === b.id}
+                        disabled={deleteBatchMutation.isPending && deleteBatchMutation.variables === b.id}
                         title="Undo this import (deletes all its transactions)"
-                        style={{ background: "none", border: "1px solid var(--border-2)", borderRadius: 4, color: "var(--expense)", fontSize: 11, padding: "3px 10px", cursor: "pointer", opacity: deletingBatch === b.id ? 0.4 : 1 }}
+                        style={{ background: "none", border: "1px solid var(--border-2)", borderRadius: 4, color: "var(--expense)", fontSize: 11, padding: "3px 10px", cursor: "pointer", opacity: (deleteBatchMutation.isPending && deleteBatchMutation.variables === b.id) ? 0.4 : 1 }}
                       >
-                        {deletingBatch === b.id ? "…" : "Undo"}
+                        {deleteBatchMutation.isPending && deleteBatchMutation.variables === b.id ? "…" : "Undo"}
                       </button>
                     </td>
                   </tr>
@@ -572,10 +762,10 @@ export default function TransactionsContent() {
                 <span style={{ fontSize: 12, color: "var(--text-muted)" }}>{trashItems.length} deleted transaction{trashItems.length !== 1 ? "s" : ""}</span>
                 <button
                   onClick={emptyTrash}
-                  disabled={emptyingTrash}
-                  style={{ padding: "5px 14px", borderRadius: 5, border: "1px solid #f8717133", background: "var(--expense-dim)", color: "var(--expense)", fontSize: 12, cursor: emptyingTrash ? "wait" : "pointer", fontFamily: "inherit" }}
+                  disabled={emptyTrashMutation.isPending}
+                  style={{ padding: "5px 14px", borderRadius: 5, border: "1px solid #f8717133", background: "var(--expense-dim)", color: "var(--expense)", fontSize: 12, cursor: emptyTrashMutation.isPending ? "wait" : "pointer", fontFamily: "inherit" }}
                 >
-                  {emptyingTrash ? "Emptying…" : "Empty trash"}
+                  {emptyTrashMutation.isPending ? "Emptying…" : "Empty trash"}
                 </button>
               </div>
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -589,8 +779,10 @@ export default function TransactionsContent() {
                 <tbody>
                   {trashItems.map((item) => {
                     const amt = parseFloat(item.amount);
+                    const isRestoring = restoreTransactionMutation.isPending && restoreTransactionMutation.variables === item.id;
+                    const isPurging = permanentDeleteMutation.isPending && permanentDeleteMutation.variables === item.id;
                     return (
-                      <tr key={item.id} style={{ borderBottom: "1px solid var(--border)", opacity: restoringId === item.id ? 0.4 : 1, transition: "opacity 0.2s" }}
+                      <tr key={item.id} style={{ borderBottom: "1px solid var(--border)", opacity: isRestoring ? 0.4 : 1, transition: "opacity 0.2s" }}
                         onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-3)")}
                         onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
                       >
@@ -624,19 +816,19 @@ export default function TransactionsContent() {
                         <td style={{ padding: "10px 12px" }}>
                           <div style={{ display: "flex", gap: 6 }}>
                             <button
-                              onClick={() => restoreTransaction(item.id)}
-                              disabled={restoringId === item.id || purgingId === item.id}
+                              onClick={() => restoreTransactionMutation.mutate(item.id)}
+                              disabled={isRestoring || isPurging}
                               style={{ padding: "4px 12px", borderRadius: 5, border: "1px solid var(--border-2)", background: "var(--bg-3)", color: "var(--income)", fontSize: 12, cursor: "pointer" }}
                             >
-                              {restoringId === item.id ? "…" : "Restore"}
+                              {isRestoring ? "…" : "Restore"}
                             </button>
                             <button
                               onClick={() => permanentlyDelete(item.id)}
-                              disabled={purgingId === item.id || restoringId === item.id}
+                              disabled={isPurging || isRestoring}
                               title="Delete forever"
                               style={{ padding: "4px 12px", borderRadius: 5, border: "1px solid #f8717133", background: "transparent", color: "var(--expense)", fontSize: 12, cursor: "pointer" }}
                             >
-                              {purgingId === item.id ? "…" : "Delete forever"}
+                              {isPurging ? "…" : "Delete forever"}
                             </button>
                           </div>
                         </td>
@@ -656,7 +848,9 @@ export default function TransactionsContent() {
         categories={categories}
         onClose={() => setEditingId(null)}
         onSaved={handleEditSaved}
-        onCategoryCreated={(cat) => setCategories((prev) => [...prev, cat])}
+        onCategoryCreated={(cat) => {
+          queryClient.setQueryData<Category[]>(QK.categories(), (old) => [...(old ?? []), cat]);
+        }}
       />
 
       {/* ── DELETE CONFIRM ── */}
@@ -674,7 +868,7 @@ export default function TransactionsContent() {
       <AgentChat
         open={agentOpen}
         onClose={() => { setAgentOpen(false); setAgentContext(null); }}
-        onTransactionsChanged={() => fetchAll(filters, page)}
+        onTransactionsChanged={() => queryClient.invalidateQueries({ queryKey: ['transactions'] })}
         contextTransaction={agentContext}
       />
 
@@ -684,7 +878,7 @@ export default function TransactionsContent() {
           categories={categories}
           accounts={accounts}
           onClose={() => setShowAdd(false)}
-          onSaved={() => { setShowAdd(false); fetchAll(filters, page); }}
+          onSaved={(body) => addTransactionMutation.mutate(body)}
         />
       )}
 
@@ -700,7 +894,7 @@ export default function TransactionsContent() {
 
 function AddModal({ categories: initialCategories, accounts, onClose, onSaved }: {
   categories: Category[]; accounts: Account[];
-  onClose: () => void; onSaved: () => void;
+  onClose: () => void; onSaved: (body: Record<string, unknown>) => void;
 }) {
   const [form, setForm] = useState({ description: "", amount: "", postedAt: today(), accountId: accounts[0]?.id ? String(accounts[0].id) : "", categoryId: "" as string | number, notes: "" });
   const [amountType, setAmountType] = useState<"expense" | "income">("expense");
@@ -712,18 +906,13 @@ function AddModal({ categories: initialCategories, accounts, onClose, onSaved }:
     if (!form.description || !form.amount || !form.accountId) return;
     setSaving(true);
     const absAmount = Math.abs(parseFloat(form.amount as string));
-    await fetch("/api/transactions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        ...form,
-        amount: amountType === "expense" ? -absAmount : absAmount,
-        accountId: parseInt(form.accountId),
-        categoryId: selectedCategory?.id ?? null,
-      }),
+    onSaved({
+      ...form,
+      amount: amountType === "expense" ? -absAmount : absAmount,
+      accountId: parseInt(form.accountId),
+      categoryId: selectedCategory?.id ?? null,
     });
     setSaving(false);
-    onSaved();
   }
 
   const toggleStyle = (active: boolean): React.CSSProperties => ({

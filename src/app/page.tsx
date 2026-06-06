@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
+import { useQuery } from "@tanstack/react-query";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
 } from "recharts";
 import { formatCurrency, formatMonth, formatTxDate, formatTxTime } from "@/lib/format";
 import NeedsAttention from "@/components/NeedsAttention";
+import { QK } from "@/lib/queryKeys";
 
 interface InsightsData {
   summary: {
@@ -100,35 +102,35 @@ function CustomTooltip({ active, payload, label }: any) {
 export default function DashboardPage() {
   // Start with current month, but auto-correct to most recent month with data
   const [month, setMonth] = useState(monthKey(new Date()));
-  const [insights, setInsights] = useState<InsightsData | null>(null);
-  const [recentTx, setRecentTx] = useState<Transaction[]>([]);
-  const [loading, setLoading] = useState(true);
   const [autoSeeked, setAutoSeeked] = useState(false);
 
   const { from, to } = monthRange(month);
   const currentMonthKey = monthKey(new Date());
   const isCurrentMonth = month === currentMonthKey;
 
-  useEffect(() => {
-    setLoading(true);
-    Promise.all([
-      fetch(`/api/insights?from=${from}&to=${to}`).then((r) => r.json()),
-      fetch(`/api/transactions?limit=8&from=${from}&to=${to}`).then((r) => r.json()),
-    ]).then(([ins, txData]) => {
-      setInsights(ins);
-      setRecentTx(txData.rows ?? []);
-      setLoading(false);
+  const { data: insights, isLoading: insightsLoading } = useQuery<InsightsData>({
+    queryKey: QK.insights(from, to),
+    queryFn: () => fetch(`/api/insights?from=${from}&to=${to}`).then((r) => r.json()),
+  });
 
-      // If current month has no data and we haven't auto-sought yet, go to most recent trend month
-      if (!autoSeeked && ins.summary.txCount === 0 && ins.monthlyTrend?.length > 0) {
-        const lastMonth = ins.monthlyTrend[ins.monthlyTrend.length - 1]?.month;
-        if (lastMonth && lastMonth !== month) {
-          setMonth(lastMonth);
-        }
-        setAutoSeeked(true);
+  const { data: recentTxData, isLoading: recentTxLoading } = useQuery<{ rows: Transaction[] }>({
+    queryKey: QK.recentTx(from, to),
+    queryFn: () => fetch(`/api/transactions?limit=8&from=${from}&to=${to}`).then((r) => r.json()),
+  });
+
+  const loading = insightsLoading || recentTxLoading;
+  const recentTx = recentTxData?.rows ?? [];
+
+  // Auto-seek to most recent month with data
+  useEffect(() => {
+    if (!autoSeeked && insights && insights.summary.txCount === 0 && insights.monthlyTrend?.length > 0) {
+      const lastMonth = insights.monthlyTrend[insights.monthlyTrend.length - 1]?.month;
+      if (lastMonth && lastMonth !== month) {
+        setMonth(lastMonth);
       }
-    });
-  }, [from, to]);
+      setAutoSeeked(true);
+    }
+  }, [insights, autoSeeked, month]);
 
   const topExpenses = (insights?.byCategory ?? [])
     .filter((c) => c.total < 0)
