@@ -11,7 +11,7 @@ export async function PATCH(
   const { id: idStr } = await params;
   const id = parseInt(idStr);
   const body = await req.json();
-  const { categoryId, notes, description, amount, postedAt } = body;
+  const { categoryId, notes, description, amount, postedAt, hidden } = body;
 
   const [tx] = await db.select().from(transactions).where(eq(transactions.id, id));
   if (!tx) return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -24,6 +24,7 @@ export async function PATCH(
       ...(description !== undefined ? { description } : {}),
       ...(amount !== undefined ? { amount: String(parseFloat(amount)) } : {}),
       ...(postedAt !== undefined ? { postedAt: new Date(postedAt) } : {}),
+      ...(hidden !== undefined ? { hidden: !!hidden } : {}),
       updatedAt: new Date(),
     })
     .where(eq(transactions.id, id));

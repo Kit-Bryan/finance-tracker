@@ -18,8 +18,10 @@ export async function GET(req: NextRequest) {
   const from = searchParams.get("from");
   const to = searchParams.get("to");
   const search = searchParams.get("search")?.trim();
+  const includeHidden = searchParams.get("includeHidden") === "1";
 
   const conditions = [isNull(transactions.deletedAt)];
+  if (!includeHidden) conditions.push(eq(transactions.hidden, false));
   if (accountId) conditions.push(eq(transactions.accountId, parseInt(accountId)));
   if (categoryId) conditions.push(eq(transactions.categoryId, parseInt(categoryId)));
   if (from) conditions.push(gte(transactions.postedAt, new Date(from)));
@@ -56,6 +58,7 @@ export async function GET(req: NextRequest) {
       isTransfer: transactions.isTransfer,
       categorySource: transactions.categorySource,
       categoryConfidence: transactions.categoryConfidence,
+      hidden: transactions.hidden,
       notes: transactions.notes,
     })
     .from(transactions)
