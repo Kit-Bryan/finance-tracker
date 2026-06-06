@@ -823,6 +823,12 @@ export async function confirmPendingAction(action: PendingAction): Promise<{ upd
     const [original] = await db.select().from(transactions).where(eq(transactions.id, action.transactionId!));
     if (!original) return { updated: 0 };
 
+    const originalAmount = parseFloat(original.amount as string);
+    const splitTotal = (action.splits ?? []).reduce((s, r) => s + r.amount, 0);
+    if (Math.abs(Math.abs(splitTotal) - Math.abs(originalAmount)) > 0.02) {
+      return { updated: 0, message: `Split amounts (${splitTotal.toFixed(2)}) don't match original (${originalAmount.toFixed(2)}). Please try again.` };
+    }
+
     // Soft-delete the original
     await db.update(transactions).set({ deletedAt: new Date(), updatedAt: new Date() }).where(eq(transactions.id, action.transactionId!));
 
