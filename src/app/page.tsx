@@ -6,6 +6,7 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
 } from "recharts";
 import { formatCurrency, formatMonth } from "@/lib/format";
+import NeedsAttention from "@/components/NeedsAttention";
 
 interface InsightsData {
   summary: {
@@ -167,6 +168,9 @@ export default function DashboardPage() {
           )}
         </div>
       </div>
+
+      {/* Proactive flags feed */}
+      <NeedsAttention />
 
       {/* No data state */}
       {!loading && insights?.summary.txCount === 0 && (

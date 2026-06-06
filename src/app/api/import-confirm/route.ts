@@ -12,6 +12,7 @@ import { bulkCategorize } from "@/lib/ai/categorize";
 import { learnMerchant } from "@/lib/categorizer/rules";
 import { categories } from "@/db/schema";
 import { PreviewRow } from "@/app/api/parse-preview/route";
+import { runAllDetectors } from "@/lib/flags/detect";
 
 interface ConfirmBody {
   accountId: number;
@@ -151,6 +152,13 @@ export async function POST(req: NextRequest) {
     .update(importBatches)
     .set({ status: "complete", importedRows, errorRows })
     .where(eq(importBatches.id, batch.id));
+
+  // Proactively scan the new data for reimbursements + low-confidence categorizations
+  try {
+    await runAllDetectors();
+  } catch (e) {
+    console.error("Flag detection failed:", e);
+  }
 
   return NextResponse.json({
     batchId: batch.id,
