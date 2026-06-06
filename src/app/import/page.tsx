@@ -6,8 +6,11 @@ import { formatCurrency } from "@/lib/format";
 
 type Step = "upload" | "preview" | "done";
 
+const IMAGE_RE = /\.(png|jpe?g|webp|gif|bmp)$/i;
+
 interface PreviewRow {
   date: string;
+  time?: string;
   description: string;
   amount: number;
   currency: string;
@@ -23,7 +26,7 @@ interface AccountInfo {
 }
 
 interface PreviewResponse {
-  type: "csv" | "pdf";
+  type: "csv" | "pdf" | "image";
   rows: PreviewRow[];
   suggestedProfile?: Record<string, unknown>;
   profileId?: number;
@@ -34,7 +37,7 @@ interface PreviewResponse {
   errorRows: number;
 }
 
-const ACCEPT = ".csv,.pdf,text/csv,application/pdf";
+const ACCEPT = ".csv,.pdf,.png,.jpg,.jpeg,.webp,.gif,.bmp,text/csv,application/pdf,image/*";
 
 export default function ImportPage() {
   const router = useRouter();
@@ -169,7 +172,7 @@ export default function ImportPage() {
           Import Transactions
         </h1>
         <p style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 4 }}>
-          Upload a bank CSV or PDF — AI detects the bank, parses the transactions, and categorizes automatically.
+          Upload a bank CSV, PDF, or screenshot — AI detects the bank, parses the transactions, and categorizes automatically.
         </p>
       </div>
 
@@ -223,7 +226,7 @@ export default function ImportPage() {
             {file ? (
               <>
                 <div style={{ fontSize: 32, marginBottom: 10 }}>
-                  {file.name.endsWith(".pdf") ? "📑" : "📊"}
+                  {file.name.toLowerCase().endsWith(".pdf") ? "📑" : IMAGE_RE.test(file.name) ? "🖼️" : "📊"}
                 </div>
                 <div style={{ fontSize: 14, color: "var(--income)", fontWeight: 600 }}>{file.name}</div>
                 <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>
@@ -237,7 +240,7 @@ export default function ImportPage() {
                   Drop your bank statement here
                 </div>
                 <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                  CSV or PDF · Maybank, CIMB, Touch 'n Go, RHB, Public Bank…
+                  CSV, PDF, or image (PNG/JPG) · Maybank, CIMB, Touch 'n Go, RHB, Public Bank…
                 </div>
               </>
             )}
@@ -295,8 +298,8 @@ export default function ImportPage() {
 
             <span style={{
               fontSize: 11, padding: "3px 10px", borderRadius: 3,
-              background: preview.type === "pdf" ? "#6366f122" : "#14b8a622",
-              color: preview.type === "pdf" ? "#818cf8" : "#2dd4bf",
+              background: preview.type === "pdf" ? "#6366f122" : preview.type === "image" ? "#f59e0b22" : "#14b8a622",
+              color: preview.type === "pdf" ? "#818cf8" : preview.type === "image" ? "#fbbf24" : "#2dd4bf",
             }}>
               {preview.type.toUpperCase()}
             </span>

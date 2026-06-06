@@ -80,26 +80,8 @@ Return ONLY valid JSON (no markdown, no explanation):
   };
 }
 
-// Ask the LLM to parse a PDF bank statement text into structured transactions
-export async function parsePdfStatement(
-  pdfText: string,
-  hint?: { currency?: string; bank?: string }
-): Promise<PdfParseResult> {
-  const ai = getAIClient();
-
-  // Truncate very long PDFs (token limit buffer)
-  const truncated = pdfText.length > 12000 ? pdfText.slice(0, 12000) + "\n[truncated]" : pdfText;
-
-  const prompt = `You are a Malaysian financial data extractor. Extract ALL transactions from this bank statement text.
-
-${hint?.bank ? `Hint — Bank: ${hint.bank}` : ""}
-
-Statement text:
----
-${truncated}
----
-
-Return ONLY valid JSON (no markdown, no explanation):
+// Shared JSON schema + extraction rules used by both the text (PDF) and vision (image) parsers
+const STATEMENT_JSON_SPEC = `Return ONLY valid JSON (no markdown, no explanation):
 {
   "account": {
     "bank": "detected bank/wallet name e.g. Maybank, CIMB, Public Bank, Touch n Go, RHB, Hong Leong",
@@ -110,6 +92,7 @@ Return ONLY valid JSON (no markdown, no explanation):
   "transactions": [
     {
       "date": "YYYY-MM-DD",
+      "time": "HH:MM",
       "description": "merchant or description",
       "amount": -50.00,
       "currency": "MYR"
@@ -122,25 +105,29 @@ Rules:
 - Skip opening/closing balance rows, fee summaries, non-transaction lines
 - currency is MYR unless clearly stated otherwise
 - transactions: [] if none found
-- accountNumber: extract the full number from the statement header (e.g. "Account No: 1234567890") — do not mask it, we handle masking ourselves`;
+- accountNumber: extract the full number from the statement header (e.g. "Account No: 1234567890") — do not mask it, we handle masking ourselves
+- time: include "time" (24-hour "HH:MM") ONLY if a specific time is shown for that transaction (common in e-wallet histories like Touch 'n Go, GrabPay). If there's no time, OMIT the field entirely — do not invent one.
+- Be precise with amounts and digits — never guess or round; transcribe exactly what is shown.`;
 
-  const resp = await ai.chat.completions.create({
-    model: DEFAULT_MODEL,
-    messages: [{ role: "user", content: prompt }],
-    temperature: 0,
-  });
-
-  const text = resp.choices[0]?.message?.content ?? "[]";
+// Parse the model's JSON response into a structured result (shared by text + vision parsers)
+function parseStatementResponse(text: string): PdfParseResult {
   const json = text.replace(/```(?:json)?/g, "").trim();
-
   try {
     const parsed = JSON.parse(json);
-    const rows: ParsedTransaction[] = (parsed.transactions ?? []).filter(
-      (r: any) =>
-        typeof r.date === "string" &&
-        typeof r.description === "string" &&
-        typeof r.amount === "number"
-    );
+    const rows: ParsedTransaction[] = (parsed.transactions ?? [])
+      .filter(
+        (r: any) =>
+          typeof r.date === "string" &&
+          typeof r.description === "string" &&
+          typeof r.amount === "number"
+      )
+      .map((r: any) => ({
+        date: r.date,
+        time: typeof r.time === "string" && /^\d{1,2}:\d{2}/.test(r.time) ? r.time : undefined,
+        description: r.description,
+        amount: r.amount,
+        currency: r.currency,
+      }));
     return {
       transactions: rows,
       account: {
@@ -156,4 +143,55 @@ Rules:
       account: { bank: "Unknown Bank", accountType: "unknown", accountNumber: "", accountName: "My Account" },
     };
   }
+}
+
+// Ask the LLM to parse a PDF bank statement's extracted text into structured transactions
+export async function parsePdfStatement(
+  pdfText: string,
+  hint?: { currency?: string; bank?: string }
+): Promise<PdfParseResult> {
+  const ai = getAIClient();
+  const truncated = pdfText.length > 12000 ? pdfText.slice(0, 12000) + "\n[truncated]" : pdfText;
+
+  const prompt = `You are a Malaysian financial data extractor. Extract ALL transactions from this bank statement text.
+${hint?.bank ? `\nHint — Bank: ${hint.bank}` : ""}
+Statement text:
+---
+${truncated}
+---
+
+${STATEMENT_JSON_SPEC}`;
+
+  const resp = await ai.chat.completions.create({
+    model: DEFAULT_MODEL,
+    messages: [{ role: "user", content: prompt }],
+    temperature: 0,
+  });
+
+  return parseStatementResponse(resp.choices[0]?.message?.content ?? "");
+}
+
+// Ask the LLM (vision) to parse bank-statement IMAGES (screenshots / photos / scans) into transactions
+export async function parseImageStatement(
+  imageDataUrls: string[],
+  hint?: { currency?: string; bank?: string }
+): Promise<PdfParseResult> {
+  const ai = getAIClient();
+
+  const prompt = `You are a Malaysian financial data extractor. The image(s) are a bank statement, e-wallet history, or a screenshot/photo of transactions. Read them carefully and extract ALL transactions.
+${hint?.bank ? `\nHint — Bank: ${hint.bank}` : ""}
+${STATEMENT_JSON_SPEC}`;
+
+  const content: any[] = [
+    { type: "text", text: prompt },
+    ...imageDataUrls.map((url) => ({ type: "image_url", image_url: { url } })),
+  ];
+
+  const resp = await ai.chat.completions.create({
+    model: DEFAULT_MODEL,
+    messages: [{ role: "user", content }],
+    temperature: 0,
+  });
+
+  return parseStatementResponse(resp.choices[0]?.message?.content ?? "");
 }

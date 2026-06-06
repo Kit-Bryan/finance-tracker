@@ -4,7 +4,7 @@ import crypto from "crypto";
 import { parse as parseCsv } from "csv-parse/sync";
 import { deduplicateFingerprints } from "@/lib/parsers/dedup";
 import { extractPdfText } from "@/lib/parsers/pdf";
-import { suggestCsvProfile, parsePdfStatement, ParsedTransaction, AccountInfo } from "@/lib/ai/parse";
+import { suggestCsvProfile, parsePdfStatement, parseImageStatement, AccountInfo } from "@/lib/ai/parse";
 import { parseCSV } from "@/lib/parsers/csv";
 import { ProfileConfig } from "@/lib/parsers/types";
 import { computeFingerprint } from "@/lib/parsers/fingerprint";
@@ -39,6 +39,19 @@ export interface PreviewResponse {
   accountIsNew: boolean;
   totalRows: number;
   errorRows: number;
+}
+
+function mimeFromName(name: string): string {
+  const ext = name.toLowerCase().split(".").pop();
+  switch (ext) {
+    case "png": return "image/png";
+    case "jpg":
+    case "jpeg": return "image/jpeg";
+    case "webp": return "image/webp";
+    case "gif": return "image/gif";
+    case "bmp": return "image/bmp";
+    default: return "image/png";
+  }
 }
 
 function hashAccountNumber(accountNumber: string): string {
@@ -107,6 +120,43 @@ export async function POST(req: NextRequest) {
 
   const buffer = Buffer.from(await file.arrayBuffer());
   const isPdf = file.name.toLowerCase().endsWith(".pdf") || file.type === "application/pdf";
+  const isImage = /\.(png|jpe?g|webp|gif|bmp)$/i.test(file.name) || file.type.startsWith("image/");
+
+  // ── Image path (vision) ─────────────────────────────────────────────────────
+  if (isImage) {
+    const mime = file.type && file.type.startsWith("image/") ? file.type : mimeFromName(file.name);
+    const dataUrl = `data:${mime};base64,${buffer.toString("base64")}`;
+
+    let result;
+    try {
+      result = await parseImageStatement([dataUrl]);
+    } catch (e) {
+      return NextResponse.json({ error: `AI image parsing failed: ${e}` }, { status: 500 });
+    }
+
+    const { transactions, account } = result;
+    const { id: accountId, isNew: accountIsNew } = await resolveAccount(account);
+
+    const rawRows: PreviewRow[] = transactions.map((r) => ({
+      date: r.date,
+      time: r.time,
+      description: r.description,
+      amount: r.amount,
+      currency: r.currency || "MYR",
+      fingerprint: computeFingerprint(accountId, new Date(r.date), r.amount, r.description),
+    }));
+    const rows = deduplicateFingerprints(rawRows);
+
+    return NextResponse.json({
+      type: "image",
+      rows,
+      account,
+      accountId,
+      accountIsNew,
+      totalRows: rows.length,
+      errorRows: 0,
+    } satisfies PreviewResponse);
+  }
 
   // ── PDF path ──────────────────────────────────────────────────────────────
   if (isPdf) {
