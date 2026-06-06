@@ -5,7 +5,7 @@ import { parse as parseCsv } from "csv-parse/sync";
 import { deduplicateFingerprints } from "@/lib/parsers/dedup";
 import { extractPdfText } from "@/lib/parsers/pdf";
 import { renderPdfToImages } from "@/lib/parsers/render";
-import { suggestCsvProfile, parsePdfStatement, parseImageStatement, AccountInfo } from "@/lib/ai/parse";
+import { suggestCsvProfile, parsePdfStatement, parseImageStatement, locateTransactionsOnImages, AccountInfo } from "@/lib/ai/parse";
 import { parseCSV } from "@/lib/parsers/csv";
 import { ProfileConfig } from "@/lib/parsers/types";
 import { computeFingerprint } from "@/lib/parsers/fingerprint";
@@ -23,6 +23,8 @@ export interface PreviewRow {
   currency: string;
   fingerprint: string;
   parseError?: string;
+  page?: number;     // 0-based page/image index this row appears on
+  yPercent?: number; // 0–1 vertical position of the row, for hover-highlight on the statement image
 }
 
 // Derive "HH:MM" (UTC) from a Date, or undefined if the time is midnight (date-only).
@@ -152,6 +154,8 @@ export async function POST(req: NextRequest) {
       amount: r.amount,
       currency: r.currency || "MYR",
       fingerprint: computeFingerprint(accountId, new Date(r.date), r.amount, r.description),
+      page: r.page ?? 0,
+      yPercent: r.yPercent,
     }));
     const rows = deduplicateFingerprints(rawRows);
 
@@ -230,8 +234,23 @@ export async function POST(req: NextRequest) {
       amount: r.amount,
       currency: r.currency || "MYR",
       fingerprint: computeFingerprint(accountId, new Date(r.date), r.amount, r.description),
+      page: r.page,
+      yPercent: r.yPercent,
     }));
     const rows = deduplicateFingerprints(rawRows);
+
+    // Text-parsed PDFs have no positional info — ask the vision model to locate
+    // each row on the rendered pages so the UI can highlight on hover. Best-effort.
+    if (pageImages.length > 0 && rows.some((r) => r.yPercent == null)) {
+      const positions = await locateTransactionsOnImages(
+        pageImages,
+        rows.map((r) => ({ date: r.date, description: r.description, amount: r.amount })),
+      );
+      for (const p of positions) {
+        const row = rows[p.index];
+        if (row && row.yPercent == null) { row.page = p.page; row.yPercent = p.yPercent; }
+      }
+    }
 
     return NextResponse.json({
       type: "pdf",
