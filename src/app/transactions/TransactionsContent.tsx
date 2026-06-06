@@ -127,6 +127,13 @@ export default function TransactionsContent() {
     setLoading(false);
   }, [showHidden]);
 
+  async function hideGoPlusNoise() {
+    const res = await fetch("/api/transactions/hide-noise", { method: "POST" });
+    const data = await res.json();
+    setBulkResult(data.hidden > 0 ? `Hid ${data.hidden} GO+ internal leg${data.hidden !== 1 ? "s" : ""}` : "No GO+ noise found to hide");
+    fetchAll(filters, page);
+  }
+
   async function toggleHidden(tx: Transaction) {
     setHidingId(tx.id);
     await fetch(`/api/transactions/${tx.id}`, {
@@ -442,7 +449,7 @@ export default function TransactionsContent() {
                               </div>
                             )}
                             {!isExpanded && (tx.merchantNormalized || tx.description).length > 35 && (
-                              <div style={{ fontSize: 10, color: "var(--text-dim)", marginTop: 1 }}>click to expand</div>
+                              <div className="expand-hint" style={{ fontSize: 10, color: "var(--text-dim)", marginTop: 1 }}>click to expand</div>
                             )}
                           </div>
                         </td>
