@@ -10,6 +10,14 @@ export interface ParsedTransaction {
   description: string;
   amount: number;     // negative = expense, positive = income
   currency: string;
+  page?: number;      // 0-based page/image index the row appears on (vision parses only)
+  yPercent?: number;  // 0–1 vertical position of the row on that page (for hover-highlight)
+}
+
+export interface TxPosition {
+  index: number;      // index into the transaction list we asked about
+  page: number;       // 0-based page/image index
+  yPercent: number;   // 0–1 vertical position of the row on that page
 }
 
 export interface PdfParseResult {
@@ -84,8 +92,11 @@ Return ONLY valid JSON (no markdown, no explanation):
   };
 }
 
-// Shared JSON schema + extraction rules used by both the text (PDF) and vision (image) parsers
-const STATEMENT_JSON_SPEC = `Return ONLY valid JSON (no markdown, no explanation):
+// Shared JSON schema + extraction rules used by both the text (PDF) and vision (image) parsers.
+// `withPosition` adds page + yPercent fields — only meaningful for vision parses, where the
+// model can actually see where each row sits on the page.
+function buildStatementSpec(withPosition: boolean): string {
+  return `Return ONLY valid JSON (no markdown, no explanation):
 {
   "account": {
     "bank": "detected bank/wallet name e.g. Maybank, CIMB, Public Bank, Touch n Go, RHB, Hong Leong",
@@ -99,7 +110,9 @@ const STATEMENT_JSON_SPEC = `Return ONLY valid JSON (no markdown, no explanation
       "time": "HH:MM",
       "description": "merchant or description",
       "amount": -50.00,
-      "currency": "MYR"
+      "currency": "MYR"${withPosition ? `,
+      "page": 0,
+      "yPercent": 0.42` : ""}
     }
   ]
 }
@@ -111,7 +124,10 @@ Rules:
 - transactions: [] if none found
 - accountNumber: extract the full number from the statement header (e.g. "Account No: 1234567890") — do not mask it, we handle masking ourselves
 - time: include "time" (24-hour "HH:MM") ONLY if a specific time is shown for that transaction (common in e-wallet histories like Touch 'n Go, GrabPay). If there's no time, OMIT the field entirely — do not invent one.
-- Be precise with amounts and digits — never guess or round; transcribe exactly what is shown.`;
+- Be precise with amounts and digits — never guess or round; transcribe exactly what is shown.${withPosition ? `
+- page: 0-based index of the image this transaction's row appears on (first image = 0).
+- yPercent: the vertical center of this transaction's row as a fraction of that page's height — 0.0 = very top, 1.0 = very bottom. Estimate where the row sits visually. Approximate is fine; this is only used to highlight the row.` : ""}`;
+}
 
 // Parse the model's JSON response into a structured result (shared by text + vision parsers)
 function parseStatementResponse(text: string): PdfParseResult {
@@ -131,6 +147,8 @@ function parseStatementResponse(text: string): PdfParseResult {
         description: r.description,
         amount: r.amount,
         currency: r.currency,
+        page: typeof r.page === "number" ? r.page : undefined,
+        yPercent: typeof r.yPercent === "number" ? Math.max(0, Math.min(1, r.yPercent)) : undefined,
       }));
     return {
       transactions: rows,
@@ -170,7 +188,7 @@ Statement text:
 ${truncatedText}
 ---
 
-${STATEMENT_JSON_SPEC}`;
+${buildStatementSpec(false)}`;
 
   const t0 = Date.now();
   let resp;
@@ -199,7 +217,7 @@ export async function parseImageStatement(
 
   const prompt = `You are a Malaysian financial data extractor. The image(s) are a bank statement, e-wallet history, or a screenshot/photo of transactions. Read them carefully and extract ALL transactions.
 ${hint?.bank ? `\nHint — Bank: ${hint.bank}` : ""}
-${STATEMENT_JSON_SPEC}`;
+${buildStatementSpec(true)}`;
 
   const content: any[] = [
     { type: "text", text: prompt },
@@ -222,4 +240,60 @@ ${STATEMENT_JSON_SPEC}`;
   const result = parseStatementResponse(resp.choices[0]?.message?.content ?? "");
   log.info({ model: DEFAULT_MODEL, ms: Date.now() - t0, images: imageDataUrls.length, transactions: result.transactions.length }, "parsed image statement (vision)");
   return result;
+}
+
+// Locate already-extracted transactions on rendered page images (vision).
+// Used for text-parsed PDFs, which never went through the vision model and so
+// have no positional info. Best-effort: returns [] on any failure.
+export async function locateTransactionsOnImages(
+  imageDataUrls: string[],
+  transactions: { date: string; description: string; amount: number }[],
+): Promise<TxPosition[]> {
+  if (transactions.length === 0 || imageDataUrls.length === 0) return [];
+  const ai = getAIClient();
+
+  const list = transactions
+    .map((t, i) => `${i}. ${t.date} | ${t.description} | ${t.amount}`)
+    .join("\n");
+
+  const prompt = `These image(s) are the pages of a bank statement (first image = page 0). Below is a numbered list of transactions already extracted from this statement. For EACH one, find where its row appears on the page images and report its position.
+
+Transactions:
+${list}
+
+Return ONLY valid JSON (no markdown):
+{ "positions": [ { "index": 0, "page": 0, "yPercent": 0.42 } ] }
+
+- index: the transaction's number from the list above
+- page: 0-based index of the image the row appears on
+- yPercent: vertical center of the row as a fraction of that page's height (0.0 = top, 1.0 = bottom)
+- Include every transaction you can locate; omit any you genuinely cannot find.`;
+
+  const content: any[] = [
+    { type: "text", text: prompt },
+    ...imageDataUrls.map((url) => ({ type: "image_url", image_url: { url } })),
+  ];
+
+  const t0 = Date.now();
+  try {
+    const resp = await ai.chat.completions.create({
+      model: DEFAULT_MODEL,
+      messages: [{ role: "user", content }],
+      temperature: 0,
+    });
+    const json = (resp.choices[0]?.message?.content ?? "{}").replace(/```(?:json)?/g, "").trim();
+    const parsed = JSON.parse(json);
+    const positions: TxPosition[] = (parsed.positions ?? [])
+      .filter((p: any) => typeof p.index === "number" && typeof p.yPercent === "number")
+      .map((p: any) => ({
+        index: p.index,
+        page: typeof p.page === "number" ? p.page : 0,
+        yPercent: Math.max(0, Math.min(1, p.yPercent)),
+      }));
+    log.info({ model: DEFAULT_MODEL, ms: Date.now() - t0, located: positions.length, of: transactions.length }, "located transactions on images");
+    return positions;
+  } catch (err) {
+    log.warn({ err }, "locateTransactionsOnImages failed — highlights unavailable for this import");
+    return [];
+  }
 }
