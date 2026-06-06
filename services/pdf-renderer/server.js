@@ -16,9 +16,49 @@ function send(res, code, obj) {
   res.end(JSON.stringify(obj));
 }
 
+// Decode the handful of XML entities pdftotext emits in word text.
+function decodeEntities(s) {
+  return s
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(parseInt(n, 10)));
+}
+
+// Parse `pdftotext -bbox` XHTML output into { pages: [{ width, height, words: [...] }] }.
+// pdftotext bbox uses a top-left origin with y increasing downward (screen-like).
+function parseBbox(xml) {
+  const pages = [];
+  const pageRe = /<page width="([\d.]+)" height="([\d.]+)">([\s\S]*?)<\/page>/g;
+  const wordRe = /<word xMin="([\d.]+)" yMin="([\d.]+)" xMax="([\d.]+)" yMax="([\d.]+)">([\s\S]*?)<\/word>/g;
+  let pm;
+  while ((pm = pageRe.exec(xml)) !== null) {
+    const width = parseFloat(pm[1]);
+    const height = parseFloat(pm[2]);
+    const inner = pm[3];
+    const words = [];
+    let wm;
+    while ((wm = wordRe.exec(inner)) !== null) {
+      words.push({
+        xMin: parseFloat(wm[1]),
+        yMin: parseFloat(wm[2]),
+        xMax: parseFloat(wm[3]),
+        yMax: parseFloat(wm[4]),
+        text: decodeEntities(wm[5]).trim(),
+      });
+    }
+    pages.push({ width, height, words });
+  }
+  return pages;
+}
+
 const server = http.createServer((req, res) => {
   if (req.method === "GET" && req.url.startsWith("/health")) return send(res, 200, { ok: true });
-  if (req.method !== "POST" || !req.url.startsWith("/render")) return send(res, 404, { error: "Not found" });
+  const isRender = req.url.startsWith("/render");
+  const isTextbox = req.url.startsWith("/textbox");
+  if (req.method !== "POST" || (!isRender && !isTextbox)) return send(res, 404, { error: "Not found" });
 
   const url = new URL(req.url, "http://localhost");
   const maxPages = Math.min(parseInt(url.searchParams.get("maxPages") || "50", 10) || 50, 50);
@@ -44,6 +84,24 @@ const server = http.createServer((req, res) => {
 
     try {
       fs.writeFileSync(pdfPath, buf);
+
+      // ── /textbox: extract per-word bounding boxes for programmatic row matching ──
+      if (isTextbox) {
+        // -bbox: emit one <word> per token with x/y bounds; "-" → stdout
+        execFile("pdftotext", ["-bbox", "-l", String(maxPages), pdfPath, "-"], { maxBuffer: 64 * 1024 * 1024 }, (err, stdout, stderr) => {
+          if (err) { cleanup(); return send(res, 500, { error: "pdftotext failed: " + (stderr || err.message) }); }
+          try {
+            send(res, 200, { pages: parseBbox(String(stdout)) });
+          } catch (e) {
+            send(res, 500, { error: String(e && e.message || e) });
+          } finally {
+            cleanup();
+          }
+        });
+        return;
+      }
+
+      // ── /render: rasterize pages to PNG ─────────────────────────────────────────
       // Read the real page count first so we can tell the caller if we capped it.
       execFile("pdfinfo", [pdfPath], (infoErr, infoOut) => {
         let totalPages = null;
