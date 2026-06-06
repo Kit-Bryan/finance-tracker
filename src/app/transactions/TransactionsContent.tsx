@@ -482,7 +482,7 @@ export default function TransactionsContent() {
 
                         {/* Hover actions */}
                         <td style={{ padding: "10px 12px", whiteSpace: "nowrap" }}>
-                          <div style={{ display: "flex", gap: 4, opacity: 0, transition: "opacity 0.15s" }} className="row-actions">
+                          <div style={{ display: "flex", gap: 4, transition: "opacity 0.15s" }} className="row-actions">
                             <ActionBtn color="var(--accent)" title="Ask AI" onClick={() => { setAgentContext({ id: tx.id, description: tx.description, merchantNormalized: tx.merchantNormalized, amount: tx.amount, postedAt: tx.postedAt, categoryName: tx.categoryName, notes: tx.notes }); setAgentOpen(true); }}>✦</ActionBtn>
                             <ActionBtn color="var(--text-muted)" title="Edit" onClick={() => setEditingId(isEditing ? null : tx.id)}>✎</ActionBtn>
                             <ActionBtn color="var(--text-muted)" title={tx.hidden ? "Unhide" : "Hide from list"} disabled={hidingId === tx.id} onClick={() => toggleHidden(tx)}>{tx.hidden ? "🚫" : "⊘"}</ActionBtn>
@@ -690,7 +690,10 @@ export default function TransactionsContent() {
       )}
 
       <style>{`
-        tr:hover .row-actions { opacity: 1 !important; }
+        .row-actions { opacity: 0.25; }
+        tr:hover .row-actions { opacity: 1; }
+        .expand-hint { opacity: 0; }
+        tr:hover .expand-hint { opacity: 1; }
       `}</style>
     </div>
   );
