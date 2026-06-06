@@ -116,12 +116,11 @@ export default function TransactionsContent() {
     if (f.from) params.set("from", f.from);
     if (f.to) params.set("to", f.to);
     if (f.accountId) params.set("accountId", f.accountId);
-    if (f.categoryId && f.categoryId !== "none") params.set("categoryId", f.categoryId);
+    if (f.categoryId) params.set("categoryId", f.categoryId); // "none" → server filters categoryId IS NULL
     if (f.search) params.set("search", f.search);
     if (showHidden) params.set("includeHidden", "1");
     const data = await fetch(`/api/transactions?${params}`).then((r) => r.json());
-    let rows: Transaction[] = data.rows ?? [];
-    if (f.categoryId === "none") rows = rows.filter((tx) => !tx.categoryId);
+    const rows: Transaction[] = data.rows ?? [];
     setTransactions(rows);
     setTotal(data.total ?? 0);
     setLoading(false);

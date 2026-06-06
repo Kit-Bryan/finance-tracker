@@ -23,7 +23,8 @@ export async function GET(req: NextRequest) {
   const conditions = [isNull(transactions.deletedAt)];
   if (!includeHidden) conditions.push(eq(transactions.hidden, false));
   if (accountId) conditions.push(eq(transactions.accountId, parseInt(accountId)));
-  if (categoryId) conditions.push(eq(transactions.categoryId, parseInt(categoryId)));
+  if (categoryId === "none") conditions.push(isNull(transactions.categoryId));
+  else if (categoryId) conditions.push(eq(transactions.categoryId, parseInt(categoryId)));
   if (from) conditions.push(gte(transactions.postedAt, new Date(from)));
   if (to) {
     const toEnd = new Date(to);
