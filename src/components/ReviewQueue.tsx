@@ -176,7 +176,7 @@ export default function ReviewQueue({ categories, onResolved, onCategoryCreated 
             Transactions need your input
           </span>
           <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
-            — AI wasn't confident enough to categorize these automatically
+            — AI wasn&apos;t confident enough to categorize these automatically
           </span>
         </div>
         <span style={{ color: "var(--text-muted)", fontSize: 14 }}>{expanded ? "▲" : "▼"}</span>

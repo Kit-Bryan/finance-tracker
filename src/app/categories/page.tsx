@@ -354,7 +354,7 @@ export default function CategoriesPage() {
           )}
 
           {visibleParents.length === 0 && (
-            <div style={{ padding: 40, textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>No categories match "{search}".</div>
+            <div style={{ padding: 40, textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>No categories match &quot;{search}&quot;.</div>
           )}
         </div>
       )}

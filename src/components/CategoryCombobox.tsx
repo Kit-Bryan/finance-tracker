@@ -212,7 +212,7 @@ export default function CategoryCombobox({
             <div style={{ fontSize: 10, color: "var(--accent)", letterSpacing: "0.08em", marginBottom: 4 }}>✦ AI SUGGESTION · {Math.round(aiSuggestion.confidence * 100)}% confident</div>
             {aiSuggestion.isNew ? (
               <button onClick={() => { setNewName(aiSuggestion.name); setNewParentId(aiSuggestion.suggestedParent ? (categories.find(c => c.name.toLowerCase() === aiSuggestion.suggestedParent!.toLowerCase())?.id ?? null) : null); setCreating(true); }} style={suggestionBtn}>
-                <span style={{ color: "var(--accent)" }}>+ Create "{aiSuggestion.name}"</span>
+                <span style={{ color: "var(--accent)" }}>+ Create &quot;{aiSuggestion.name}&quot;</span>
                 {aiSuggestion.suggestedParent && <span style={{ fontSize: 10, color: "var(--text-muted)", marginLeft: 6 }}>under {aiSuggestion.suggestedParent}</span>}
               </button>
             ) : (() => { const cat = categories.find((c) => c.id === aiSuggestion.categoryId || c.name.toLowerCase() === aiSuggestion.name.toLowerCase()); return cat ? (<button onClick={() => selectCat(cat)} style={suggestionBtn}>{cat.color && <span style={{ width: 7, height: 7, borderRadius: "50%", background: cat.color }} />}<span style={{ color: cat.color ?? "var(--text)" }}>{cat.name}</span></button>) : null; })()}
@@ -245,7 +245,7 @@ export default function CategoryCombobox({
             ))}
           </div>
         ))}
-        {q && !exactMatch && !creating && <button onClick={() => { setNewName(query); setCreating(true); setQuery(""); }} style={{ ...suggestionBtn, padding: "8px 14px", borderTop: "1px solid var(--border)", color: "var(--accent)" }}>+ Create "{query}"</button>}
+        {q && !exactMatch && !creating && <button onClick={() => { setNewName(query); setCreating(true); setQuery(""); }} style={{ ...suggestionBtn, padding: "8px 14px", borderTop: "1px solid var(--border)", color: "var(--accent)" }}>+ Create &quot;{query}&quot;</button>}
         {!q && !creating && <button onClick={() => { setNewName(""); setCreating(true); }} style={{ ...suggestionBtn, padding: "8px 14px", borderTop: "1px solid var(--border)", color: "var(--text-muted)" }}>+ New category</button>}
       </div>
       {creating && (

@@ -45,7 +45,7 @@ export async function POST(req: NextRequest) {
   let parsedRows;
 
   try {
-    parsedRows = parseCSV(csvText, profile.config as any, accountId);
+    parsedRows = parseCSV(csvText, profile.config as Parameters<typeof parseCSV>[1], accountId);
   } catch (e: unknown) {
     await db
       .update(importBatches)
