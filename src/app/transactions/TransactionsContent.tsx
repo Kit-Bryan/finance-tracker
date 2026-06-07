@@ -33,10 +33,11 @@ interface Transaction {
   categorySource: string | null;
   hidden: boolean;
   reimbursementForId: number | null;
+  reimbursementForName: string | null;
   notes: string | null;
 }
 
-interface Category { id: number; name: string; color: string | null; parentId: number | null; }
+interface Category { id: number; name: string; color: string | null; parentId: number | null; isTransfer?: boolean; }
 interface Account { id: number; name: string; bank: string; }
 interface TrashItem {
   id: number;
@@ -66,6 +67,8 @@ interface ImportBatch {
 interface TxListData {
   rows: Transaction[];
   total: number;
+  totalIncome: number;   // true income across the whole filtered range (excl. transfers/repayments)
+  totalExpense: number;
 }
 
 const selectStyle: React.CSSProperties = {
@@ -441,8 +444,10 @@ export default function TransactionsContent() {
   const childrenOf = (pid: number) => categories.filter((c) => c.parentId === pid);
 
   const uncategorizedCount = transactions.filter((tx) => !tx.categoryId).length;
-  const totalExpense = transactions.filter((t) => parseFloat(t.amount) < 0).reduce((s, t) => s + parseFloat(t.amount), 0);
-  const totalIncome = transactions.filter((t) => parseFloat(t.amount) > 0).reduce((s, t) => s + parseFloat(t.amount), 0);
+  // True income/expense for the whole filtered range — computed server-side (not a page sum),
+  // excludes transfers + repayments, and stable regardless of the hidden toggle.
+  const totalIncome = txData?.totalIncome ?? 0;
+  const totalExpense = txData?.totalExpense ?? 0;
   const totalPages = Math.ceil(total / LIMIT);
 
   // ── Handlers ──────────────────────────────────────────────────────────────
@@ -669,7 +674,7 @@ export default function TransactionsContent() {
                         {/* Category badge (or repayment indicator) */}
                         <td style={{ padding: "10px 16px" }}>
                           {tx.reimbursementForId
-                            ? <span title="Linked as a repayment — netted into the original expense, not counted on its own" style={{ fontSize: 11, padding: "2px 8px", borderRadius: 3, background: "var(--accent-dim)", color: "var(--accent)", whiteSpace: "nowrap" }}>↩ Repayment</span>
+                            ? <span title={`Repayment netted into "${tx.reimbursementForName ?? "an expense"}" — not counted as its own income`} style={{ fontSize: 11, padding: "2px 8px", borderRadius: 3, background: "var(--accent-dim)", color: "var(--accent)", whiteSpace: "nowrap", maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", display: "inline-block", verticalAlign: "bottom" }}>↩ Repayment{tx.reimbursementForName ? ` → ${tx.reimbursementForName}` : ""}</span>
                             : tx.categoryName
                               ? <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 3, background: (tx.categoryColor ?? "#888") + "22", color: tx.categoryColor ?? "var(--text-muted)", whiteSpace: "nowrap" }}>
                                   {tx.parentCategoryName && <span style={{ opacity: 0.6 }}>{tx.parentCategoryName} › </span>}
