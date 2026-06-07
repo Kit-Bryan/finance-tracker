@@ -79,6 +79,10 @@ export const categories = pgTable("categories", {
   color: varchar("color", { length: 7 }),
   icon: varchar("icon", { length: 50 }),
   isTransfer: boolean("is_transfer").default(false),
+  // System role binds a mandatory category to a function (so code references it by role,
+  // not by a deletable/renamable name). 'income' | 'transfer' | 'uncategorized'.
+  // A non-null role makes the category undeletable.
+  role: varchar("role", { length: 20 }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   deletedAt: timestamp("deleted_at"),
 });
@@ -117,6 +121,30 @@ export const transactions = pgTable(
     fingerprintIdx: uniqueIndex("transactions_fingerprint_idx").on(t.fingerprint).where(sql`deleted_at IS NULL`),
     postedAtIdx: index("transactions_posted_at_idx").on(t.postedAt),
     accountIdx: index("transactions_account_idx").on(t.accountId),
+  })
+);
+
+// ─── Reimbursement allocations ───────────────────────────────────────────────
+// A many-to-many link: one incoming repayment can be split across several expenses,
+// and one expense can be repaid by several people. `amount` is how much of the
+// repayment (positive) is applied to that expense. Any part of a repayment left
+// unallocated stays as income (e.g. a friend rounding up).
+export const reimbursementAllocations = pgTable(
+  "reimbursement_allocations",
+  {
+    id: serial("id").primaryKey(),
+    repaymentId: integer("repayment_id")
+      .notNull()
+      .references(() => transactions.id),
+    expenseId: integer("expense_id")
+      .notNull()
+      .references(() => transactions.id),
+    amount: numeric("amount", { precision: 15, scale: 2 }).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (t) => ({
+    repaymentIdx: index("reimb_alloc_repayment_idx").on(t.repaymentId),
+    expenseIdx: index("reimb_alloc_expense_idx").on(t.expenseId),
   })
 );
 
