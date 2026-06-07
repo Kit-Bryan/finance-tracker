@@ -100,7 +100,7 @@ export default function AgentChat({ open, onClose, onTransactionsChanged, contex
     setLoadingSession(true);
     const data = await fetch(`/api/chat-sessions/${id}`).then((r) => r.json());
     setSessionId(id);
-    setMessages(data.messages.map((m: any) => ({
+    setMessages(data.messages.map((m: { role: "user" | "assistant"; content: string; toolResults?: Message["toolResults"]; pendingAction?: PendingAction }) => ({
       role: m.role,
       content: m.content,
       toolResults: m.toolResults,

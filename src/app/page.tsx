@@ -85,12 +85,16 @@ function SummaryCard({ label, value, type, sub }: { label: string; value: number
   );
 }
 
-function CustomTooltip({ active, payload, label }: any) {
+function CustomTooltip({ active, payload, label }: {
+  active?: boolean;
+  payload?: Array<{ dataKey?: string | number; value: number; fill?: string }>;
+  label?: string;
+}) {
   if (!active || !payload?.length) return null;
   return (
     <div style={{ background: "var(--bg-3)", border: "1px solid var(--border-2)", borderRadius: 6, padding: "10px 14px", fontSize: 12, fontFamily: "var(--font-ibm-mono)" }}>
       <div style={{ color: "var(--text-muted)", marginBottom: 4, fontSize: 11 }}>{label}</div>
-      {payload.map((p: any) => (
+      {payload.map((p) => (
         <div key={p.dataKey} style={{ color: p.fill }}>{formatCurrency(Math.abs(p.value), "MYR")}</div>
       ))}
     </div>
@@ -247,7 +251,7 @@ export default function DashboardPage() {
                   <XAxis type="number" hide />
                   <YAxis type="category" dataKey="categoryName" width={100} tick={{ fill: "var(--text-muted)", fontSize: 11 }} axisLine={false} tickLine={false} />
                   <Tooltip content={<CustomTooltip />} cursor={{ fill: "var(--border)" }} />
-                  <Bar dataKey="abs" radius={[0, 3, 3, 0]} maxBarSize={16} label={{ position: "right", formatter: (v: any) => formatCurrency(Number(v), "MYR"), style: { fill: "var(--text-muted)", fontSize: 10 } }}>
+                  <Bar dataKey="abs" radius={[0, 3, 3, 0]} maxBarSize={16} label={{ position: "right", formatter: (v: number | string) => formatCurrency(Number(v), "MYR"), style: { fill: "var(--text-muted)", fontSize: 10 } }}>
                     {topExpenses.map((entry, i) => <Cell key={i} fill={entry.categoryColor ?? "var(--accent)"} fillOpacity={0.85} />)}
                   </Bar>
                 </BarChart>
