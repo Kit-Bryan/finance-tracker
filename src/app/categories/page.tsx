@@ -12,6 +12,7 @@ interface Cat {
   parentId: number | null;
   color: string | null;
   isTransfer: boolean;
+  role: string | null;   // 'income' | 'transfer' | 'uncategorized' → mandatory, can't be deleted
   txCount: number;
   total: number;
 }
@@ -302,12 +303,13 @@ export default function CategoriesPage() {
                       <span onClick={() => { setEditingId(parent.id); setDraftName(parent.name); }} style={{ fontSize: 14, fontWeight: 600, color: "var(--text)", cursor: "text" }}>{parent.name}</span>
                     )}
                     {!isOpen && roll.kidCount > 0 && <span style={{ fontSize: 11, color: "var(--text-dim)", marginLeft: 8 }}>{roll.kidCount} sub</span>}
+                    {parent.role && <SystemBadge />}
                   </div>
                   <Stats count={roll.count} total={roll.total} muted={!isOpen} onNavigate={() => router.push(`/transactions?categoryId=${parent.id}`)} />
                   <div className="cat-actions" style={{ display: "flex", gap: 4 }}>
                     <RowBtn onClick={() => { setCreating({ parentId: parent.id }); setNewName(""); setExpanded((p) => new Set(p).add(parent.id)); }} title="Add subcategory">+ sub</RowBtn>
-                    <RowBtn onClick={() => setPicker({ kind: "merge", source: parent })} title="Merge into another category">merge</RowBtn>
-                    <RowBtn onClick={() => del(parent)} title="Delete" danger>delete</RowBtn>
+                    {!parent.role && <RowBtn onClick={() => setPicker({ kind: "merge", source: parent })} title="Merge into another category">merge</RowBtn>}
+                    {!parent.role && <RowBtn onClick={() => del(parent)} title="Delete" danger>delete</RowBtn>}
                   </div>
                 </div>
 
@@ -323,11 +325,12 @@ export default function CategoriesPage() {
                       )}
                     </div>
                     <Stats count={kid.txCount} total={kid.total} onNavigate={() => router.push(`/transactions?categoryId=${kid.id}`)} />
+                    {kid.role && <SystemBadge />}
                     <div className="cat-actions" style={{ display: "flex", gap: 4 }}>
                       <RowBtn onClick={() => setPicker({ kind: "move", cat: kid })} title="Move to another parent">move</RowBtn>
                       <RowBtn onClick={() => makeTopLevel(kid)} title="Promote to top-level">promote</RowBtn>
-                      <RowBtn onClick={() => setPicker({ kind: "merge", source: kid })} title="Merge into another category">merge</RowBtn>
-                      <RowBtn onClick={() => del(kid)} title="Delete" danger>delete</RowBtn>
+                      {!kid.role && <RowBtn onClick={() => setPicker({ kind: "merge", source: kid })} title="Merge into another category">merge</RowBtn>}
+                      {!kid.role && <RowBtn onClick={() => del(kid)} title="Delete" danger>delete</RowBtn>}
                     </div>
                   </div>
                 ))}
@@ -469,6 +472,17 @@ function RowBtn({ children, onClick, title, danger }: { children: React.ReactNod
     <button onClick={onClick} title={title} style={{ padding: "4px 9px", borderRadius: 5, border: "1px solid var(--border-2)", background: "transparent", color: danger ? "var(--expense)" : "var(--text-muted)", fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>
       {children}
     </button>
+  );
+}
+
+function SystemBadge() {
+  return (
+    <span
+      title="Required by the system — can be renamed or recolored, but not deleted or merged."
+      style={{ marginLeft: 8, fontSize: 9, letterSpacing: "0.08em", textTransform: "uppercase", padding: "2px 7px", borderRadius: 4, border: "1px solid var(--border-2)", background: "var(--bg-3)", color: "var(--text-muted)", whiteSpace: "nowrap", verticalAlign: "middle", cursor: "help" }}
+    >
+      🔒 System
+    </span>
   );
 }
 

@@ -86,8 +86,9 @@ export async function DELETE(
   const [cat] = await db.select().from(categories).where(eq(categories.id, catId));
   if (!cat || cat.deletedAt) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  if (cat.name.toLowerCase() === "uncategorized") {
-    return NextResponse.json({ error: "The Uncategorized category can't be deleted" }, { status: 400 });
+  // Mandatory system categories (income / transfer / uncategorized) can never be deleted.
+  if (cat.role) {
+    return NextResponse.json({ error: `The ${cat.name} category is required by the system and can't be deleted.` }, { status: 400 });
   }
 
   const family = await getFamilyIds(catId);

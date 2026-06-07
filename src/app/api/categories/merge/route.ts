@@ -20,6 +20,11 @@ export async function POST(req: NextRequest) {
   if (!source || !target) return NextResponse.json({ error: "Category not found" }, { status: 404 });
   if (source.deletedAt || target.deletedAt) return NextResponse.json({ error: "Category not found" }, { status: 404 });
 
+  // Merging deletes the source — system categories are mandatory and can't be removed this way.
+  if (source.role) {
+    return NextResponse.json({ error: `The ${source.name} category is required by the system and can't be merged away.` }, { status: 400 });
+  }
+
   try {
     const result = await mergeCategories(sourceId, targetId);
     return NextResponse.json({ ok: true, ...result });

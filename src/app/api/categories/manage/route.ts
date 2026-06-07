@@ -32,6 +32,7 @@ export async function GET() {
         parentId: c.parentId,
         color: c.color,
         isTransfer: c.isTransfer ?? false,
+        role: c.role ?? null,
         txCount: s ? Number(s.count) : 0,
         total: s ? parseFloat(s.total ?? "0") : 0,
       };
