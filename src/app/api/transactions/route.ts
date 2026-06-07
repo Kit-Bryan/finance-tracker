@@ -66,6 +66,13 @@ export async function GET(req: NextRequest) {
       hidden: transactions.hidden,
       reimbursementForId: transactions.reimbursementForId,
       reimbursementForName: sql<string | null>`coalesce(${reimbExpense.merchantNormalized}, ${reimbExpense.description})`,
+      reimbursementForAmount: reimbExpense.amount,
+      reimbursementForPostedAt: reimbExpense.postedAt,
+      // For an expense: the total of repayments linked back to it (positive). null if none.
+      reimbursedTotal: sql<string | null>`(
+        select sum(r.amount) from ${transactions} r
+        where r.reimbursement_for_id = ${transactions.id} and r.deleted_at is null
+      )`,
       notes: transactions.notes,
     })
     .from(transactions)

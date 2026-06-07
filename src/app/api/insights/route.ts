@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
         total: sql<string>`sum(${transactions.amount})`,
       })
       .from(transactions)
-      .where(and(inArray(transactions.reimbursementForId as any, txIds), isNull(transactions.deletedAt)))
+      .where(and(inArray(transactions.reimbursementForId, txIds), isNull(transactions.deletedAt)))
       .groupBy(transactions.reimbursementForId);
     const map = new Map<number, number>();
     for (const r of rows) {

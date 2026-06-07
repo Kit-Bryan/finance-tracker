@@ -15,7 +15,8 @@ export function getDb() {
 // Convenience proxy so existing code using `db.select()` etc. still works
 export const db = new Proxy({} as ReturnType<typeof drizzle>, {
   get(_target, prop) {
-    return (getDb() as any)[prop];
+    const instance = getDb() as unknown as Record<string | symbol, unknown>;
+    return instance[prop];
   },
 });
 
