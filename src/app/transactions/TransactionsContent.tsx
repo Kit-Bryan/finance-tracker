@@ -7,7 +7,7 @@ import ReviewQueue from "@/components/ReviewQueue";
 import AgentChat, { ContextTransaction } from "@/components/AgentChat";
 import CategoryCombobox, { CategoryValue } from "@/components/CategoryCombobox";
 import FilterCategoryCombobox from "@/components/FilterCategoryCombobox";
-import TransactionEditPanel from "@/components/TransactionEditPanel";
+import TransactionEditPanel, { DetailTransaction } from "@/components/TransactionEditPanel";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import ReimbursePicker from "@/components/ReimbursePicker";
 import {
@@ -34,6 +34,9 @@ interface Transaction {
   hidden: boolean;
   reimbursementForId: number | null;
   reimbursementForName: string | null;
+  reimbursementForAmount: string | null;
+  reimbursementForPostedAt: string | null;
+  reimbursedTotal: string | null;
   notes: string | null;
 }
 
@@ -99,18 +102,18 @@ export default function TransactionsContent() {
   const [showHidden, setShowHidden] = useState(false);
 
   const [editingId, setEditingId] = useState<number | null>(null);
+  // A linked expense may fall outside the current filter range; when the panel needs
+  // one that isn't in the loaded rows, we fetch it on demand and stash it here.
+  const [fetchedDetail, setFetchedDetail] = useState<Transaction | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState<Transaction | null>(null);
-  const [reimburseFor, setReimburseFor] = useState<Transaction | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<DetailTransaction | null>(null);
+  const [reimburseFor, setReimburseFor] = useState<DetailTransaction | null>(null);
   const [bulkResult, setBulkResult] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [agentOpen, setAgentOpen] = useState(false);
   const [agentContext, setAgentContext] = useState<ContextTransaction | null>(null);
-  const [expandedDescriptions, setExpandedDescriptions] = useState<Set<number>>(new Set());
-  const [editingNoteId, setEditingNoteId] = useState<number | null>(null);
-  const [noteDraft, setNoteDraft] = useState("");
-  const [generatingNoteId, setGeneratingNoteId] = useState<number | null>(null);
-
+  const [moreOpen, setMoreOpen] = useState(false);   // header "⋯ More" menu
+  const [kebabFor, setKebabFor] = useState<number | null>(null);  // per-row "⋯" menu
   const LIMIT = 50;
 
   // Build query key params object
@@ -186,6 +189,14 @@ export default function TransactionsContent() {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, []);
+
+  // ── Close popover menus on any outside click ───────────────────────────────
+  useEffect(() => {
+    if (!moreOpen && kebabFor == null) return;
+    const close = () => { setMoreOpen(false); setKebabFor(null); };
+    window.addEventListener("click", close);
+    return () => window.removeEventListener("click", close);
+  }, [moreOpen, kebabFor]);
 
   // ── Mutations ─────────────────────────────────────────────────────────────
 
@@ -314,93 +325,6 @@ export default function TransactionsContent() {
     },
   });
 
-  const updateNoteMutation = useMutation({
-    mutationFn: ({ txId, note }: { txId: number; note: string }) =>
-      fetch(`/api/transactions/${txId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ notes: note }),
-      }).then((r) => r.json()),
-    onMutate: async ({ txId, note }) => {
-      setEditingNoteId(null);
-      await queryClient.cancelQueries({ queryKey: txKey });
-      const prev = queryClient.getQueryData<TxListData>(txKey);
-      queryClient.setQueryData<TxListData>(txKey, (old) => {
-        if (!old) return old;
-        return {
-          ...old,
-          rows: old.rows.map((t) => t.id === txId ? { ...t, notes: note } : t),
-        };
-      });
-      return { prev };
-    },
-    onError: (_e, _v, ctx) => {
-      if (ctx?.prev) queryClient.setQueryData(txKey, ctx.prev);
-    },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ['transactions'] });
-    },
-  });
-
-  const generateNoteMutation = useMutation({
-    mutationFn: (txId: number) =>
-      fetch(`/api/transactions/${txId}/note`, { method: "POST" }).then((r) => r.json()),
-    onMutate: (txId) => {
-      setGeneratingNoteId(txId);
-    },
-    onSuccess: (data, txId) => {
-      queryClient.setQueryData<TxListData>(txKey, (old) => {
-        if (!old) return old;
-        return {
-          ...old,
-          rows: old.rows.map((t) => t.id === txId ? { ...t, notes: data.note ?? t.notes } : t),
-        };
-      });
-    },
-    onSettled: () => {
-      setGeneratingNoteId(null);
-      queryClient.invalidateQueries({ queryKey: ['transactions'] });
-    },
-  });
-
-  const updateCategoryMutation = useMutation({
-    mutationFn: ({ id, categoryId, categorySource }: { id: number; categoryId: number | null; categorySource: string }) =>
-      fetch(`/api/transactions/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ categoryId, categorySource }),
-      }).then((r) => r.json()),
-    onMutate: async ({ id, categoryId }) => {
-      await queryClient.cancelQueries({ queryKey: txKey });
-      const prev = queryClient.getQueryData<TxListData>(txKey);
-      // Find matching category for display
-      const cat = categories.find((c) => c.id === categoryId);
-      queryClient.setQueryData<TxListData>(txKey, (old) => {
-        if (!old) return old;
-        return {
-          ...old,
-          rows: old.rows.map((t) =>
-            t.id === id
-              ? {
-                  ...t,
-                  categoryId: categoryId,
-                  categoryName: cat?.name ?? null,
-                  categoryColor: cat?.color ?? null,
-                }
-              : t
-          ),
-        };
-      });
-      return { prev };
-    },
-    onError: (_e, _v, ctx) => {
-      if (ctx?.prev) queryClient.setQueryData(txKey, ctx.prev);
-    },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ['transactions'] });
-    },
-  });
-
   const bulkCategorizeMutation = useMutation({
     mutationFn: () =>
       fetch("/api/transactions/bulk-categorize", {
@@ -440,15 +364,18 @@ export default function TransactionsContent() {
 
   // ── Derived ───────────────────────────────────────────────────────────────
 
-  const parentCats = categories.filter((c) => !c.parentId);
-  const childrenOf = (pid: number) => categories.filter((c) => c.parentId === pid);
-
   const uncategorizedCount = transactions.filter((tx) => !tx.categoryId).length;
   // True income/expense for the whole filtered range — computed server-side (not a page sum),
   // excludes transfers + repayments, and stable regardless of the hidden toggle.
   const totalIncome = txData?.totalIncome ?? 0;
   const totalExpense = txData?.totalExpense ?? 0;
   const totalPages = Math.ceil(total / LIMIT);
+
+  // The transaction shown in the detail panel: prefer the live row (stays fresh after
+  // edits); fall back to a fetched out-of-range transaction.
+  const detailTx =
+    transactions.find((t) => t.id === editingId) ??
+    (fetchedDetail?.id === editingId ? fetchedDetail : null);
 
   // ── Handlers ──────────────────────────────────────────────────────────────
 
@@ -461,7 +388,25 @@ export default function TransactionsContent() {
 
   function handleEditSaved() {
     setEditingId(null);
+    setFetchedDetail(null);
     queryClient.invalidateQueries({ queryKey: ['transactions'] });
+  }
+
+  function closeDetail() {
+    setEditingId(null);
+    setFetchedDetail(null);
+  }
+
+  // Open the detail panel for a transaction. If it isn't in the loaded rows
+  // (e.g. a linked expense outside the current date range), fetch it on demand.
+  async function openDetail(id: number) {
+    setEditingId(id);
+    const inRows = transactions.some((t) => t.id === id);
+    if (inRows) { setFetchedDetail(null); return; }
+    try {
+      const tx = await fetch(`/api/transactions/${id}`).then((r) => r.json());
+      if (tx && !tx.error) setFetchedDetail(tx as Transaction);
+    } catch { /* leave panel empty if it fails */ }
   }
 
   function confirmDeleteTransaction() {
@@ -511,18 +456,6 @@ export default function TransactionsContent() {
               {bulkCategorizeMutation.isPending ? "Categorizing…" : `✦ AI categorize ${uncategorizedCount}`}
             </button>
           )}
-          <button onClick={hideGoPlusNoise} title="Hide all GO+ internal legs (Quick Reload / Cash Out) already imported" style={{
-            padding: "7px 14px", borderRadius: 6, border: "1px solid var(--border-2)",
-            background: "var(--bg-3)", color: "var(--text-muted)", fontSize: 12, cursor: "pointer", fontFamily: "inherit",
-          }}>
-            Hide GO+ noise
-          </button>
-          <button onClick={() => setShowHidden((s) => !s)} title="Toggle hidden transactions (e.g. GO+ internal legs)" style={{
-            padding: "7px 14px", borderRadius: 6, border: "1px solid var(--border-2)",
-            background: showHidden ? "var(--accent-dim)" : "var(--bg-3)", color: showHidden ? "var(--accent)" : "var(--text-muted)", fontSize: 12, cursor: "pointer", fontFamily: "inherit",
-          }}>
-            {showHidden ? "✓ Showing hidden" : "Show hidden"}
-          </button>
           <button onClick={() => setShowAdd(true)} style={{
             padding: "7px 14px", borderRadius: 6, border: "1px solid var(--border-2)",
             background: "var(--bg-3)", color: "var(--text)", fontSize: 12, cursor: "pointer", fontFamily: "inherit",
@@ -536,6 +469,26 @@ export default function TransactionsContent() {
           }}>
             ✦ Ask AI
           </button>
+
+          {/* ⋯ More — occasional/maintenance actions */}
+          <div style={{ position: "relative" }} onClick={(e) => e.stopPropagation()}>
+            <button onClick={() => setMoreOpen((s) => !s)} title="More options" style={{
+              padding: "7px 12px", borderRadius: 6, border: "1px solid var(--border-2)",
+              background: moreOpen ? "var(--bg-3)" : "transparent", color: "var(--text-muted)", fontSize: 14, cursor: "pointer", fontFamily: "inherit", lineHeight: 1,
+            }}>
+              ⋯{showHidden && <span style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: "var(--accent)", marginLeft: 6, verticalAlign: "middle" }} />}
+            </button>
+            {moreOpen && (
+              <div style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, zIndex: 60, minWidth: 210, background: "var(--bg-2)", border: "1px solid var(--border-2)", borderRadius: 8, padding: 6, boxShadow: "0 8px 28px #00000055" }}>
+                <MenuItem onClick={() => { setShowHidden((s) => !s); setMoreOpen(false); }}>
+                  {showHidden ? "✓ Showing hidden" : "Show hidden transactions"}
+                </MenuItem>
+                <MenuItem onClick={() => { hideGoPlusNoise(); setMoreOpen(false); }}>
+                  Hide GO+ noise
+                </MenuItem>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -622,19 +575,22 @@ export default function TransactionsContent() {
                     const isIncome = amt > 0;
                     const isEditing = editingId === tx.id;
                     const isDeleting = deletingId === tx.id;
-                    const isHiding = toggleHiddenMutation.isPending && toggleHiddenMutation.variables?.id === tx.id;
                     const displayName = tx.merchantNormalized || tx.description;
-                    const isExpanded = expandedDescriptions.has(tx.id);
+                    const repaid = tx.reimbursedTotal != null ? parseFloat(tx.reimbursedTotal) : 0;
+                    const isRepaidExpense = !tx.reimbursementForId && repaid !== 0;
+                    const net = amt + repaid;
 
                     return (
                       <tr
                         key={tx.id}
+                        onClick={() => openDetail(tx.id)}
                         style={{
                           borderBottom: "1px solid var(--border)",
                           background: isEditing ? "var(--accent-dim)" : isDeleting ? "var(--expense-dim)" : "transparent",
                           borderLeft: isEditing ? "3px solid var(--accent)" : "3px solid transparent",
                           transition: "background 0.15s, border-color 0.15s",
                           opacity: isDeleting ? 0.5 : tx.hidden ? 0.45 : 1,
+                          cursor: "pointer",
                         }}
                         onMouseEnter={(e) => !isEditing && (e.currentTarget.style.background = "var(--bg-3)")}
                         onMouseLeave={(e) => !isEditing && (e.currentTarget.style.background = "transparent")}
@@ -648,27 +604,18 @@ export default function TransactionsContent() {
                         </td>
 
                         {/* Merchant / Description */}
-                        <td style={{ padding: "10px 16px", maxWidth: 300, cursor: "pointer" }}
-                          onClick={() => setExpandedDescriptions((prev) => { const next = new Set(prev); next.has(tx.id) ? next.delete(tx.id) : next.add(tx.id); return next; })}
-                        >
-                          <div>
-                            <div style={{ fontSize: 13, color: "var(--text)", overflow: isExpanded ? "visible" : "hidden", textOverflow: isExpanded ? "unset" : "ellipsis", whiteSpace: isExpanded ? "normal" : "nowrap", wordBreak: isExpanded ? "break-word" : "normal" }}>
-                              {displayName}
-                            </div>
-                            {tx.notes && (
-                              <div style={{ marginTop: 2 }} onClick={(e) => e.stopPropagation()}>
-                                <span style={{ fontSize: 11, color: "var(--accent)", fontStyle: "italic" }}>{tx.notes}</span>
-                              </div>
-                            )}
-                            {tx.merchantNormalized && tx.merchantNormalized !== tx.description && (
-                              <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 1, overflow: isExpanded ? "visible" : "hidden", textOverflow: isExpanded ? "unset" : "ellipsis", whiteSpace: isExpanded ? "normal" : "nowrap" }}>
-                                {tx.description}
-                              </div>
-                            )}
-                            {!isExpanded && (tx.merchantNormalized || tx.description).length > 35 && (
-                              <div className="expand-hint" style={{ fontSize: 10, color: "var(--text-dim)", marginTop: 1 }}>click to expand</div>
-                            )}
+                        <td style={{ padding: "10px 16px", maxWidth: 300 }}>
+                          <div style={{ fontSize: 13, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {displayName}
                           </div>
+                          {tx.notes && (
+                            <div style={{ fontSize: 11, color: "var(--accent)", fontStyle: "italic", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{tx.notes}</div>
+                          )}
+                          {tx.merchantNormalized && tx.merchantNormalized !== tx.description && (
+                            <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {tx.description}
+                            </div>
+                          )}
                         </td>
 
                         {/* Category badge (or repayment indicator) */}
@@ -686,21 +633,46 @@ export default function TransactionsContent() {
                         {/* Account */}
                         <td style={{ padding: "10px 16px", fontSize: 12, color: "var(--text-muted)", whiteSpace: "nowrap" }}>{tx.accountName ?? "—"}</td>
 
-                        {/* Amount */}
+                        {/* Amount (net for repaid expenses) */}
                         <td style={{ padding: "10px 16px", textAlign: "right", fontFamily: "var(--font-ibm-mono)", whiteSpace: "nowrap" }}>
-                          <span style={{ fontSize: 13, fontWeight: 500, color: isIncome ? "var(--income)" : "var(--expense)" }}>
-                            {isIncome ? "+" : ""}{formatCurrency(amt, "MYR")}
-                          </span>
+                          {isRepaidExpense ? (
+                            <>
+                              <span title="Your net cost after repayments" style={{ fontSize: 13, fontWeight: 600, color: net < 0 ? "var(--expense)" : "var(--income)" }}>
+                                {net > 0 ? "+" : ""}{formatCurrency(net, "MYR")}
+                              </span>
+                              <div style={{ fontSize: 10, color: "var(--text-dim)", marginTop: 1 }}>
+                                <span style={{ textDecoration: "line-through" }}>{formatCurrency(amt, "MYR")}</span>
+                                {" · "}repaid +{formatCurrency(Math.abs(repaid), "MYR")}
+                              </div>
+                            </>
+                          ) : (
+                            <span style={{ fontSize: 13, fontWeight: 500, color: isIncome ? "var(--income)" : "var(--expense)" }}>
+                              {isIncome ? "+" : ""}{formatCurrency(amt, "MYR")}
+                            </span>
+                          )}
                         </td>
 
-                        {/* Hover actions */}
-                        <td style={{ padding: "10px 12px", whiteSpace: "nowrap" }}>
-                          <div style={{ display: "flex", gap: 4, transition: "opacity 0.15s" }} className="row-actions">
-                            <ActionBtn color="var(--accent)" title="Ask AI" onClick={() => { setAgentContext({ id: tx.id, description: tx.description, merchantNormalized: tx.merchantNormalized, amount: tx.amount, postedAt: tx.postedAt, categoryName: tx.categoryName, notes: tx.notes }); setAgentOpen(true); }}>✦</ActionBtn>
-                            <ActionBtn color="var(--text-muted)" title="Edit" onClick={() => setEditingId(isEditing ? null : tx.id)}>✎</ActionBtn>
-                            <ActionBtn color={tx.reimbursementForId ? "var(--accent)" : "var(--text-muted)"} title={tx.reimbursementForId ? "Edit repayment link" : "Mark as a repayment for an expense"} onClick={() => setReimburseFor(tx)}>↩</ActionBtn>
-                            <ActionBtn color="var(--text-muted)" title={tx.hidden ? "Unhide" : "Hide from list"} disabled={isHiding} onClick={() => toggleHiddenMutation.mutate({ id: tx.id, hidden: !tx.hidden })}>{tx.hidden ? "🚫" : "⊘"}</ActionBtn>
-                            <ActionBtn color="var(--expense)" title="Delete" onClick={() => setConfirmDelete(tx)}>✕</ActionBtn>
+                        {/* Per-row kebab — quick actions (full set lives in the detail panel) */}
+                        <td style={{ padding: "10px 12px", whiteSpace: "nowrap", textAlign: "right" }} onClick={(e) => e.stopPropagation()}>
+                          <div style={{ position: "relative", display: "inline-block" }}>
+                            <button
+                              className="row-kebab"
+                              title="Quick actions"
+                              onClick={(e) => { e.stopPropagation(); setKebabFor(kebabFor === tx.id ? null : tx.id); }}
+                              style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 16, padding: "2px 6px", borderRadius: 4, lineHeight: 1 }}
+                            >
+                              ⋯
+                            </button>
+                            {kebabFor === tx.id && (
+                              <div style={{ position: "absolute", top: "calc(100% + 4px)", right: 0, zIndex: 40, minWidth: 150, background: "var(--bg-2)", border: "1px solid var(--border-2)", borderRadius: 8, padding: 6, boxShadow: "0 8px 28px #00000055", textAlign: "left" }}>
+                                <MenuItem onClick={() => { toggleHiddenMutation.mutate({ id: tx.id, hidden: !tx.hidden }); setKebabFor(null); }}>
+                                  {tx.hidden ? "Unhide" : "Hide from list"}
+                                </MenuItem>
+                                <MenuItem danger onClick={() => { setConfirmDelete(tx); setKebabFor(null); }}>
+                                  Delete
+                                </MenuItem>
+                              </div>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -869,13 +841,23 @@ export default function TransactionsContent() {
 
       {/* ── EDIT PANEL ── */}
       <TransactionEditPanel
-        transaction={transactions.find((t) => t.id === editingId) ?? null}
+        transaction={detailTx}
         categories={categories}
-        onClose={() => setEditingId(null)}
+        onClose={closeDetail}
         onSaved={handleEditSaved}
         onCategoryCreated={(cat) => {
           queryClient.setQueryData<Category[]>(QK.categories(), (old) => [...(old ?? []), cat]);
         }}
+        onAskAI={(tx) => {
+          setAgentContext({ id: tx.id, description: tx.description, merchantNormalized: tx.merchantNormalized, amount: tx.amount, postedAt: tx.postedAt, categoryName: tx.categoryName, notes: tx.notes });
+          setAgentOpen(true);
+          closeDetail();
+        }}
+        onToggleHidden={(tx) => toggleHiddenMutation.mutate({ id: tx.id, hidden: !tx.hidden })}
+        onDelete={(tx) => { setConfirmDelete(tx); closeDetail(); }}
+        onReimburse={(tx) => setReimburseFor(tx)}
+        onOpenLinked={(id) => openDetail(id)}
+        hidingBusy={toggleHiddenMutation.isPending}
       />
 
       {/* ── DELETE CONFIRM ── */}
@@ -918,10 +900,9 @@ export default function TransactionsContent() {
       )}
 
       <style>{`
-        .row-actions { opacity: 0.25; }
-        tr:hover .row-actions { opacity: 1; }
-        .expand-hint { opacity: 0; }
-        tr:hover .expand-hint { opacity: 1; }
+        .row-kebab { opacity: 0; transition: opacity 0.15s; }
+        tr:hover .row-kebab { opacity: 1; }
+        .row-kebab:hover { background: var(--bg-2) !important; color: var(--text) !important; }
       `}</style>
     </div>
   );
@@ -1028,9 +1009,18 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function ActionBtn({ children, onClick, color, disabled, title }: { children: React.ReactNode; onClick: () => void; color?: string; disabled?: boolean; title?: string }) {
+function MenuItem({ children, onClick, danger }: { children: React.ReactNode; onClick: () => void; danger?: boolean }) {
   return (
-    <button title={title} onClick={onClick} disabled={disabled} style={{ background: "none", border: "none", color: color ?? "var(--text-muted)", cursor: disabled ? "wait" : "pointer", fontSize: 13, padding: "2px 5px", borderRadius: 3 }}>
+    <button
+      onClick={onClick}
+      style={{
+        display: "block", width: "100%", textAlign: "left", padding: "8px 10px", borderRadius: 5,
+        background: "none", border: "none", cursor: "pointer", fontSize: 13, fontFamily: "inherit",
+        color: danger ? "var(--expense)" : "var(--text)",
+      }}
+      onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-3)")}
+      onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
+    >
       {children}
     </button>
   );
