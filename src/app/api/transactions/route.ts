@@ -7,6 +7,8 @@ import { computeFingerprint } from "@/lib/parsers/fingerprint";
 
 // Self-join alias to resolve a category's parent name
 const parentCat = alias(categories, "parent_cat");
+// Self-join alias to resolve the expense a repayment is linked to
+const reimbExpense = alias(transactions, "reimb_expense");
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -21,7 +23,6 @@ export async function GET(req: NextRequest) {
   const includeHidden = searchParams.get("includeHidden") === "1";
 
   const conditions = [isNull(transactions.deletedAt)];
-  if (!includeHidden) conditions.push(eq(transactions.hidden, false));
   if (accountId) conditions.push(eq(transactions.accountId, parseInt(accountId)));
   if (categoryId === "none") conditions.push(isNull(transactions.categoryId));
   else if (categoryId) conditions.push(eq(transactions.categoryId, parseInt(categoryId)));
@@ -42,6 +43,9 @@ export async function GET(req: NextRequest) {
     );
   }
 
+  // The visible list respects the hidden toggle; the totals below ignore it so they stay stable.
+  const rowConditions = includeHidden ? conditions : [...conditions, eq(transactions.hidden, false)];
+
   const rows = await db
     .select({
       id: transactions.id,
@@ -61,13 +65,15 @@ export async function GET(req: NextRequest) {
       categoryConfidence: transactions.categoryConfidence,
       hidden: transactions.hidden,
       reimbursementForId: transactions.reimbursementForId,
+      reimbursementForName: sql<string | null>`coalesce(${reimbExpense.merchantNormalized}, ${reimbExpense.description})`,
       notes: transactions.notes,
     })
     .from(transactions)
+    .leftJoin(reimbExpense, eq(transactions.reimbursementForId, reimbExpense.id))
     .leftJoin(categories, eq(transactions.categoryId, categories.id))
     .leftJoin(parentCat, eq(categories.parentId, parentCat.id))
     .leftJoin(accounts, eq(transactions.accountId, accounts.id))
-    .where(conditions.length > 0 ? and(...conditions) : undefined)
+    .where(and(...rowConditions))
     .orderBy(desc(transactions.postedAt))
     .limit(limit)
     .offset(offset);
@@ -75,9 +81,31 @@ export async function GET(req: NextRequest) {
   const [{ count }] = await db
     .select({ count: sql<number>`count(*)` })
     .from(transactions)
-    .where(conditions.length > 0 ? and(...conditions) : undefined);
+    .where(and(...rowConditions));
 
-  return NextResponse.json({ rows, total: Number(count), page, limit });
+  // True income/expense across the WHOLE filtered range — excludes transfers + repayments,
+  // and ignores the hidden toggle, so the figures don't shift when you reveal hidden rows.
+  const [agg] = await db
+    .select({
+      income: sql<string>`coalesce(sum(case when ${transactions.amount} > 0 then ${transactions.amount} else 0 end), 0)`,
+      expense: sql<string>`coalesce(sum(case when ${transactions.amount} < 0 then ${transactions.amount} else 0 end), 0)`,
+    })
+    .from(transactions)
+    .leftJoin(categories, eq(transactions.categoryId, categories.id))
+    .where(and(
+      ...conditions,
+      isNull(transactions.reimbursementForId),
+      or(isNull(categories.isTransfer), eq(categories.isTransfer, false))!,
+    ));
+
+  return NextResponse.json({
+    rows,
+    total: Number(count),
+    page,
+    limit,
+    totalIncome: parseFloat(agg.income),
+    totalExpense: parseFloat(agg.expense),
+  });
 }
 
 export async function POST(req: NextRequest) {
