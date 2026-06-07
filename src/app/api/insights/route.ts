@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { transactions, categories } from "@/db/schema";
-import { sql, eq, and, gte, lte, isNull, inArray } from "drizzle-orm";
+import { transactions, categories, reimbursementAllocations } from "@/db/schema";
+import { sql, eq, and, gte, lte, isNull, inArray, or } from "drizzle-orm";
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -13,22 +13,27 @@ export async function GET(req: NextRequest) {
 
   // ── Helpers ──────────────────────────────────────────────────────────────────
 
-  // Fetch reimbursement totals for a set of expense transaction IDs
-  async function getReimbursementMap(txIds: number[]): Promise<Map<number, number>> {
-    if (txIds.length === 0) return new Map();
-    const rows = await db
+  // For a set of transaction ids, fetch allocation rollups in BOTH directions:
+  //  inMap[expenseId]   = repayments applied to that expense (offsets the cost)
+  //  outMap[repaymentId] = how much of that income row was applied to expenses
+  async function getAllocationMaps(txIds: number[]): Promise<{ inMap: Map<number, number>; outMap: Map<number, number> }> {
+    const inMap = new Map<number, number>();
+    const outMap = new Map<number, number>();
+    if (txIds.length === 0) return { inMap, outMap };
+    const allocs = await db
       .select({
-        forId: transactions.reimbursementForId,
-        total: sql<string>`sum(${transactions.amount})`,
+        repaymentId: reimbursementAllocations.repaymentId,
+        expenseId: reimbursementAllocations.expenseId,
+        amount: reimbursementAllocations.amount,
       })
-      .from(transactions)
-      .where(and(inArray(transactions.reimbursementForId, txIds), isNull(transactions.deletedAt)))
-      .groupBy(transactions.reimbursementForId);
-    const map = new Map<number, number>();
-    for (const r of rows) {
-      if (r.forId != null) map.set(r.forId, parseFloat(r.total ?? "0"));
+      .from(reimbursementAllocations)
+      .where(or(inArray(reimbursementAllocations.expenseId, txIds), inArray(reimbursementAllocations.repaymentId, txIds))!);
+    for (const a of allocs) {
+      const amt = parseFloat(a.amount);
+      inMap.set(a.expenseId, (inMap.get(a.expenseId) ?? 0) + amt);
+      outMap.set(a.repaymentId, (outMap.get(a.repaymentId) ?? 0) + amt);
     }
-    return map;
+    return { inMap, outMap };
   }
 
   // ── Period transactions (for summary + byCategory) ────────────────────────
@@ -40,6 +45,8 @@ export async function GET(req: NextRequest) {
   // kept as records, but excluded from income/expense/byCategory/trend totals.
   const transferCatIds = new Set(allCats.filter((c) => c.isTransfer).map((c) => c.id));
   const isTransferTx = (categoryId: number | null) => categoryId != null && transferCatIds.has(categoryId);
+  // A repayment's unallocated leftover is re-homed here (income), regardless of the row's own category.
+  const otherIncomeCatId = allCats.find((c) => c.role === "other_income")?.id ?? null;
 
   const periodTx = await db
     .select({
@@ -54,13 +61,14 @@ export async function GET(req: NextRequest) {
         lte(transactions.postedAt, toDate),
         eq(transactions.isTransfer, false),
         isNull(transactions.deletedAt),
-        isNull(transactions.reimbursementForId), // exclude reimbursement transfers themselves
       )
     );
 
-  // Drop transfer-category transactions from the spending view (still recorded, just not counted)
-  const periodSpending = periodTx.filter((t) => !isTransferTx(t.categoryId));
-  const reimbMap = await getReimbursementMap(periodSpending.map((t) => t.id));
+  // Allocation maps first (over ALL rows) so we know which are repayments before filtering.
+  const { inMap: reimbInMap, outMap: reimbOutMap } = await getAllocationMaps(periodTx.map((t) => t.id));
+  const isRepayment = (id: number) => (reimbOutMap.get(id) ?? 0) > 0.001;
+  // Drop transfer-category rows — but keep repayments (their leftover is income).
+  const periodSpending = periodTx.filter((t) => !isTransferTx(t.categoryId) || isRepayment(t.id));
 
   // byCategory: net amounts
   const byCategoryMap = new Map<
@@ -70,19 +78,20 @@ export async function GET(req: NextRequest) {
   let totalIncome = 0, totalExpense = 0;
 
   for (const tx of periodSpending) {
-    const reimbursed = reimbMap.get(tx.id) ?? 0;
-    const net = parseFloat(tx.amount as string) + reimbursed;
+    const net = parseFloat(tx.amount as string) + (reimbInMap.get(tx.id) ?? 0) - (reimbOutMap.get(tx.id) ?? 0);
 
     if (net > 0) totalIncome += net; else totalExpense += net;
 
-    const existing = byCategoryMap.get(tx.categoryId ?? null);
+    // A repayment's leftover is bucketed under "Other Income", not the repayment's own category.
+    const bucketCatId = isRepayment(tx.id) && otherIncomeCatId != null ? otherIncomeCatId : (tx.categoryId ?? null);
+    const existing = byCategoryMap.get(bucketCatId);
     if (existing) {
       existing.total += net;
       existing.count++;
     } else {
-      const cat = tx.categoryId ? catMap.get(tx.categoryId) : null;
-      byCategoryMap.set(tx.categoryId ?? null, {
-        categoryId: tx.categoryId ?? null,
+      const cat = bucketCatId != null ? catMap.get(bucketCatId) : null;
+      byCategoryMap.set(bucketCatId, {
+        categoryId: bucketCatId,
         categoryName: cat?.name ?? null,
         categoryColor: cat?.color ?? null,
         total: net,
@@ -111,17 +120,15 @@ export async function GET(req: NextRequest) {
         gte(transactions.postedAt, trendSince),
         eq(transactions.isTransfer, false),
         isNull(transactions.deletedAt),
-        isNull(transactions.reimbursementForId),
       )
     );
 
-  const trendSpending = trendTx.filter((t) => !isTransferTx(t.categoryId));
-  const trendReimbMap = await getReimbursementMap(trendSpending.map((t) => t.id));
+  const { inMap: trendInMap, outMap: trendOutMap } = await getAllocationMaps(trendTx.map((t) => t.id));
+  const trendSpending = trendTx.filter((t) => !isTransferTx(t.categoryId) || (trendOutMap.get(t.id) ?? 0) > 0.001);
 
   const monthMap = new Map<string, { income: number; expense: number }>();
   for (const tx of trendSpending) {
-    const reimbursed = trendReimbMap.get(tx.id) ?? 0;
-    const net = parseFloat(tx.amount as string) + reimbursed;
+    const net = parseFloat(tx.amount as string) + (trendInMap.get(tx.id) ?? 0) - (trendOutMap.get(tx.id) ?? 0);
     const month = new Date(tx.postedAt).toISOString().slice(0, 7);
     if (!monthMap.has(month)) monthMap.set(month, { income: 0, expense: 0 });
     const entry = monthMap.get(month)!;
@@ -146,7 +153,6 @@ export async function GET(req: NextRequest) {
         gte(transactions.postedAt, fromDate),
         lte(transactions.postedAt, toDate),
         isNull(transactions.deletedAt),
-        isNull(transactions.reimbursementForId),
       )
     );
 

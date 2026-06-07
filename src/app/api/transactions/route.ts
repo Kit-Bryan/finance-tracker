@@ -1,14 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { transactions, categories, accounts } from "@/db/schema";
+import { transactions, categories, accounts, reimbursementAllocations } from "@/db/schema";
 import { eq, and, gte, lte, sql, desc, isNull, or, ilike } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { computeFingerprint } from "@/lib/parsers/fingerprint";
 
 // Self-join alias to resolve a category's parent name
 const parentCat = alias(categories, "parent_cat");
-// Self-join alias to resolve the expense a repayment is linked to
-const reimbExpense = alias(transactions, "reimb_expense");
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -64,19 +62,20 @@ export async function GET(req: NextRequest) {
       categorySource: transactions.categorySource,
       categoryConfidence: transactions.categoryConfidence,
       hidden: transactions.hidden,
-      reimbursementForId: transactions.reimbursementForId,
-      reimbursementForName: sql<string | null>`coalesce(${reimbExpense.merchantNormalized}, ${reimbExpense.description})`,
-      reimbursementForAmount: reimbExpense.amount,
-      reimbursementForPostedAt: reimbExpense.postedAt,
-      // For an expense: the total of repayments linked back to it (positive). null if none.
-      reimbursedTotal: sql<string | null>`(
-        select sum(r.amount) from ${transactions} r
-        where r.reimbursement_for_id = ${transactions.id} and r.deleted_at is null
+      // Allocation rollups (many-to-many repayments):
+      //  allocatedIn  = repayments applied TO this expense (positive)
+      //  allocatedOut = how much of this (income) row is applied to expenses
+      allocatedIn: sql<string>`(select coalesce(sum(a.amount), 0) from ${reimbursementAllocations} a where a.expense_id = ${transactions.id})`,
+      allocatedOut: sql<string>`(select coalesce(sum(a.amount), 0) from ${reimbursementAllocations} a where a.repayment_id = ${transactions.id})`,
+      allocationCount: sql<number>`(select count(*)::int from ${reimbursementAllocations} a where a.repayment_id = ${transactions.id})`,
+      primaryTargetName: sql<string | null>`(
+        select coalesce(e.merchant_normalized, e.description)
+        from ${reimbursementAllocations} a join ${transactions} e on e.id = a.expense_id
+        where a.repayment_id = ${transactions.id} order by a.id limit 1
       )`,
       notes: transactions.notes,
     })
     .from(transactions)
-    .leftJoin(reimbExpense, eq(transactions.reimbursementForId, reimbExpense.id))
     .leftJoin(categories, eq(transactions.categoryId, categories.id))
     .leftJoin(parentCat, eq(categories.parentId, parentCat.id))
     .leftJoin(accounts, eq(transactions.accountId, accounts.id))
@@ -91,13 +90,16 @@ export async function GET(req: NextRequest) {
     .where(and(...rowConditions));
 
   // True income/expense across the WHOLE filtered range. Matches the dashboard:
-  //  - excludes transfers and the repayment rows themselves
-  //  - NETS each expense by the repayments linked to it (a -100 expense repaid +40 counts as -60)
+  //  - excludes transfers
+  //  - one unified net per row: amount + repayments received (as an expense)
+  //    − amount applied out (as a repayment). So a −100 expense repaid +40 nets to −60,
+  //    a fully-allocated repayment nets to 0, and a rounded-up repayment's leftover counts as income.
   //  - ignores the hidden toggle, so figures don't shift when you reveal hidden rows
-  const netExpr = sql<number>`(${transactions.amount} + coalesce((
-    select sum(r.amount) from ${transactions} r
-    where r.reimbursement_for_id = ${transactions.id} and r.deleted_at is null
-  ), 0))`;
+  const netExpr = sql<number>`(
+    ${transactions.amount}
+    + coalesce((select sum(a.amount) from ${reimbursementAllocations} a where a.expense_id = ${transactions.id}), 0)
+    - coalesce((select sum(a.amount) from ${reimbursementAllocations} a where a.repayment_id = ${transactions.id}), 0)
+  )`;
   const [agg] = await db
     .select({
       income: sql<string>`coalesce(sum(case when ${netExpr} > 0 then ${netExpr} else 0 end), 0)`,
@@ -107,8 +109,13 @@ export async function GET(req: NextRequest) {
     .leftJoin(categories, eq(transactions.categoryId, categories.id))
     .where(and(
       ...conditions,
-      isNull(transactions.reimbursementForId),
-      or(isNull(categories.isTransfer), eq(categories.isTransfer, false))!,
+      // Exclude transfers — EXCEPT a repayment row (one with outgoing allocations), whose
+      // unallocated leftover is real income and must count regardless of its category.
+      or(
+        isNull(categories.isTransfer),
+        eq(categories.isTransfer, false),
+        sql`(select coalesce(sum(a.amount), 0) from ${reimbursementAllocations} a where a.repayment_id = ${transactions.id}) > 0`,
+      )!,
     ));
 
   return NextResponse.json({
