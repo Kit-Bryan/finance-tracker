@@ -83,12 +83,18 @@ export async function GET(req: NextRequest) {
     .from(transactions)
     .where(and(...rowConditions));
 
-  // True income/expense across the WHOLE filtered range — excludes transfers + repayments,
-  // and ignores the hidden toggle, so the figures don't shift when you reveal hidden rows.
+  // True income/expense across the WHOLE filtered range. Matches the dashboard:
+  //  - excludes transfers and the repayment rows themselves
+  //  - NETS each expense by the repayments linked to it (a -100 expense repaid +40 counts as -60)
+  //  - ignores the hidden toggle, so figures don't shift when you reveal hidden rows
+  const netExpr = sql<number>`(${transactions.amount} + coalesce((
+    select sum(r.amount) from ${transactions} r
+    where r.reimbursement_for_id = ${transactions.id} and r.deleted_at is null
+  ), 0))`;
   const [agg] = await db
     .select({
-      income: sql<string>`coalesce(sum(case when ${transactions.amount} > 0 then ${transactions.amount} else 0 end), 0)`,
-      expense: sql<string>`coalesce(sum(case when ${transactions.amount} < 0 then ${transactions.amount} else 0 end), 0)`,
+      income: sql<string>`coalesce(sum(case when ${netExpr} > 0 then ${netExpr} else 0 end), 0)`,
+      expense: sql<string>`coalesce(sum(case when ${netExpr} < 0 then ${netExpr} else 0 end), 0)`,
     })
     .from(transactions)
     .leftJoin(categories, eq(transactions.categoryId, categories.id))
