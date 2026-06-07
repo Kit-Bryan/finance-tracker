@@ -131,12 +131,12 @@ function parseStatementResponse(text: string): PdfParseResult {
     const parsed = JSON.parse(json);
     const rows: ParsedTransaction[] = (parsed.transactions ?? [])
       .filter(
-        (r: any) =>
+        (r: { date: string; description: string; amount: number }) =>
           typeof r.date === "string" &&
           typeof r.description === "string" &&
           typeof r.amount === "number"
       )
-      .map((r: any) => ({
+      .map((r: { date: string; description: string; amount: number; currency?: string; time?: unknown; page?: unknown; yPercent?: unknown }) => ({
         date: r.date,
         time: typeof r.time === "string" && /^\d{1,2}:\d{2}/.test(r.time) ? r.time : undefined,
         description: r.description,
@@ -214,9 +214,11 @@ export async function parseImageStatement(
 ${hint?.bank ? `\nHint — Bank: ${hint.bank}` : ""}
 ${buildStatementSpec(true)}`;
 
-  const content: any[] = [
+  const content: Array<
+    { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }
+  > = [
     { type: "text", text: prompt },
-    ...imageDataUrls.map((url) => ({ type: "image_url", image_url: { url } })),
+    ...imageDataUrls.map((url) => ({ type: "image_url" as const, image_url: { url } })),
   ];
 
   const t0 = Date.now();
@@ -278,8 +280,8 @@ Return ONLY valid JSON (no markdown):
     const json = (resp.choices[0]?.message?.content ?? "{}").replace(/```(?:json)?/g, "").trim();
     const parsed = JSON.parse(json);
     const map = (parsed.map ?? [])
-      .filter((m: any) => typeof m.index === "number" && typeof m.lineIndex === "number" && m.lineIndex >= 0 && m.lineIndex < lines.length)
-      .map((m: any) => ({ index: m.index, lineIndex: m.lineIndex }));
+      .filter((m: { index: number; lineIndex: number }) => typeof m.index === "number" && typeof m.lineIndex === "number" && m.lineIndex >= 0 && m.lineIndex < lines.length)
+      .map((m: { index: number; lineIndex: number }) => ({ index: m.index, lineIndex: m.lineIndex }));
     log.info({ model: DEFAULT_MODEL, ms: Date.now() - t0, mapped: map.length, of: txns.length }, "mapped stragglers to statement lines");
     return map;
   } catch (err) {

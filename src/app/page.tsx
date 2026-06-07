@@ -251,7 +251,7 @@ export default function DashboardPage() {
                   <XAxis type="number" hide />
                   <YAxis type="category" dataKey="categoryName" width={100} tick={{ fill: "var(--text-muted)", fontSize: 11 }} axisLine={false} tickLine={false} />
                   <Tooltip content={<CustomTooltip />} cursor={{ fill: "var(--border)" }} />
-                  <Bar dataKey="abs" radius={[0, 3, 3, 0]} maxBarSize={16} label={{ position: "right", formatter: (v: number | string) => formatCurrency(Number(v), "MYR"), style: { fill: "var(--text-muted)", fontSize: 10 } }}>
+                  <Bar dataKey="abs" radius={[0, 3, 3, 0]} maxBarSize={16} label={{ position: "right", formatter: (v) => formatCurrency(Number(v), "MYR"), style: { fill: "var(--text-muted)", fontSize: 10 } }}>
                     {topExpenses.map((entry, i) => <Cell key={i} fill={entry.categoryColor ?? "var(--accent)"} fillOpacity={0.85} />)}
                   </Bar>
                 </BarChart>

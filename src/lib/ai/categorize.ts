@@ -99,12 +99,12 @@ Return ONLY a JSON array (no markdown):
     }
     const mapped = results
       .filter(
-        (r: any) =>
+        (r: { id: number; merchantName: string; categoryName: string; confidence: number; note?: string }) =>
           typeof r.id === "number" &&
           typeof r.merchantName === "string" &&
           typeof r.categoryName === "string"
       )
-      .map((r: any) => ({ ...r, note: r.note ?? "" }));
+      .map((r: { id: number; merchantName: string; categoryName: string; confidence: number; note?: string }) => ({ ...r, note: r.note ?? "" }));
     log.info({ model: DEFAULT_MODEL, ms: Date.now() - t0, input: transactions.length, categorized: mapped.length }, "bulk categorized");
     return mapped;
   } catch (err) {

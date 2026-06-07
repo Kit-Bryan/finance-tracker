@@ -1,3 +1,4 @@
+import type OpenAI from "openai";
 import { getAIClient, DEFAULT_MODEL } from "./client";
 import { db } from "@/db";
 import { transactions, categories, accounts } from "@/db/schema";
@@ -674,7 +675,7 @@ Guidelines:
 - Amounts are in MYR. Negative = expense, positive = income.
 - You CAN find group-expense reimbursements using suggest_reimbursements. Use it when the user mentions paying for friends, group dinners, or wanting to see their real share. Then call link_reimbursements so the dashboard shows the netted amount instead of the full group cost.`;
 
-  const messages: any[] = [
+  const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
     { role: "system", content: systemPrompt },
     ...history.map((m) => ({ role: m.role, content: m.content })),
     { role: "user", content: userMessage },
@@ -709,7 +710,7 @@ Guidelines:
 
     // Execute each tool call
     for (const call of msg.tool_calls) {
-      const fn = (call as any).function;
+      const fn = (call as { function: { name: string; arguments: string } }).function;
       const name: string = fn.name;
       const args = JSON.parse(fn.arguments);
       let result: unknown;
@@ -733,7 +734,7 @@ Guidelines:
         result !== null &&
         "__pending_confirmation" in result
       ) {
-        const r = result as any;
+        const r = result as unknown as PendingAction;
         pendingConfirmation = {
           type: r.type,
           // bulk_update_category
@@ -812,7 +813,7 @@ export async function confirmPendingAction(action: PendingAction): Promise<{ upd
       const cat = allCats.find(c => c.name === catChange.newValue);
       if (cat) { updates.categoryId = cat.id; updates.categorySource = "user"; updates.categoryConfidence = "1"; }
     }
-    await db.update(transactions).set(updates as any).where(eq(transactions.id, txId));
+    await db.update(transactions).set(updates as Partial<typeof transactions.$inferInsert>).where(eq(transactions.id, txId));
     return { updated: 1 };
   }
 
