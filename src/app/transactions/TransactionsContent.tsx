@@ -9,7 +9,8 @@ import CategoryCombobox, { CategoryValue } from "@/components/CategoryCombobox";
 import FilterCategoryCombobox from "@/components/FilterCategoryCombobox";
 import TransactionEditPanel, { DetailTransaction } from "@/components/TransactionEditPanel";
 import ConfirmDialog from "@/components/ConfirmDialog";
-import ReimbursePicker from "@/components/ReimbursePicker";
+import AllocationEditor from "@/components/AllocationEditor";
+import SplitModal from "@/components/SplitModal";
 import {
   useQuery,
   useMutation,
@@ -32,11 +33,10 @@ interface Transaction {
   accountName: string | null;
   categorySource: string | null;
   hidden: boolean;
-  reimbursementForId: number | null;
-  reimbursementForName: string | null;
-  reimbursementForAmount: string | null;
-  reimbursementForPostedAt: string | null;
-  reimbursedTotal: string | null;
+  allocatedIn: string | null;    // repayments applied TO this expense (positive)
+  allocatedOut: string | null;   // how much of this income row is applied to expenses
+  allocationCount: number;       // how many expenses this repayment covers
+  primaryTargetName: string | null;
   notes: string | null;
 }
 
@@ -107,7 +107,9 @@ export default function TransactionsContent() {
   const [fetchedDetail, setFetchedDetail] = useState<Transaction | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<DetailTransaction | null>(null);
-  const [reimburseFor, setReimburseFor] = useState<DetailTransaction | null>(null);
+  const [allocateFor, setAllocateFor] = useState<DetailTransaction | null>(null);
+  const [splitFor, setSplitFor] = useState<DetailTransaction | null>(null);
+  const [allocVersion, setAllocVersion] = useState(0);  // bump to refresh the panel's allocation lists
   const [bulkResult, setBulkResult] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [agentOpen, setAgentOpen] = useState(false);
@@ -311,19 +313,14 @@ export default function TransactionsContent() {
     },
   });
 
-  const reimburseMutation = useMutation({
-    mutationFn: ({ repaymentId, expenseId }: { repaymentId: number; expenseId: number | null }) =>
-      fetch(`/api/transactions/${repaymentId}/reimburse`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ expenseId }),
-      }).then((r) => r.json()),
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ['transactions'] });
-      queryClient.invalidateQueries({ queryKey: ['review-queue'] });
-      queryClient.invalidateQueries({ queryKey: ['insights'] });
-    },
-  });
+  // Called after allocations or a split change — refresh lists, dashboard, and the
+  // open panel's allocation sections.
+  function afterAllocationChange() {
+    queryClient.invalidateQueries({ queryKey: ['transactions'] });
+    queryClient.invalidateQueries({ queryKey: ['review-queue'] });
+    queryClient.invalidateQueries({ queryKey: ['insights'] });
+    setAllocVersion((v) => v + 1);
+  }
 
   const bulkCategorizeMutation = useMutation({
     mutationFn: () =>
@@ -576,8 +573,10 @@ export default function TransactionsContent() {
                     const isEditing = editingId === tx.id;
                     const isDeleting = deletingId === tx.id;
                     const displayName = tx.merchantNormalized || tx.description;
-                    const repaid = tx.reimbursedTotal != null ? parseFloat(tx.reimbursedTotal) : 0;
-                    const isRepaidExpense = !tx.reimbursementForId && repaid !== 0;
+                    const repaid = tx.allocatedIn != null ? parseFloat(tx.allocatedIn) : 0;
+                    const allocatedOut = tx.allocatedOut != null ? parseFloat(tx.allocatedOut) : 0;
+                    const isRepayment = allocatedOut > 0.001;
+                    const isRepaidExpense = !isIncome && repaid > 0.001;
                     const net = amt + repaid;
 
                     return (
@@ -620,8 +619,8 @@ export default function TransactionsContent() {
 
                         {/* Category badge (or repayment indicator) */}
                         <td style={{ padding: "10px 16px" }}>
-                          {tx.reimbursementForId
-                            ? <span title={`Repayment netted into "${tx.reimbursementForName ?? "an expense"}" — not counted as its own income`} style={{ fontSize: 11, padding: "2px 8px", borderRadius: 3, background: "var(--accent-dim)", color: "var(--accent)", whiteSpace: "nowrap", maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", display: "inline-block", verticalAlign: "bottom" }}>↩ Repayment{tx.reimbursementForName ? ` → ${tx.reimbursementForName}` : ""}</span>
+                          {isRepayment
+                            ? <span title={`Repayment netted into your expenses — only the unallocated remainder counts as income`} style={{ fontSize: 11, padding: "2px 8px", borderRadius: 3, background: "var(--accent-dim)", color: "var(--accent)", whiteSpace: "nowrap", maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", display: "inline-block", verticalAlign: "bottom" }}>↩ Repayment{tx.primaryTargetName ? ` → ${tx.primaryTargetName}` : ""}{tx.allocationCount > 1 ? ` +${tx.allocationCount - 1}` : ""}</span>
                             : tx.categoryName
                               ? <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 3, background: (tx.categoryColor ?? "#888") + "22", color: tx.categoryColor ?? "var(--text-muted)", whiteSpace: "nowrap" }}>
                                   {tx.parentCategoryName && <span style={{ opacity: 0.6 }}>{tx.parentCategoryName} › </span>}
@@ -855,7 +854,9 @@ export default function TransactionsContent() {
         }}
         onToggleHidden={(tx) => toggleHiddenMutation.mutate({ id: tx.id, hidden: !tx.hidden })}
         onDelete={(tx) => { setConfirmDelete(tx); closeDetail(); }}
-        onReimburse={(tx) => setReimburseFor(tx)}
+        onAllocate={(tx) => setAllocateFor(tx)}
+        onSplit={(tx) => setSplitFor(tx)}
+        refreshKey={allocVersion}
         onOpenLinked={(id) => openDetail(id)}
         hidingBusy={toggleHiddenMutation.isPending}
       />
@@ -889,13 +890,23 @@ export default function TransactionsContent() {
         />
       )}
 
-      {/* ── REIMBURSEMENT PICKER ── */}
-      {reimburseFor && (
-        <ReimbursePicker
-          repayment={reimburseFor}
-          busy={reimburseMutation.isPending}
-          onPick={(expenseId) => { reimburseMutation.mutate({ repaymentId: reimburseFor.id, expenseId }); setReimburseFor(null); }}
-          onClose={() => setReimburseFor(null)}
+      {/* ── ALLOCATION EDITOR (one repayment → many expenses) ── */}
+      {allocateFor && (
+        <AllocationEditor
+          repayment={allocateFor}
+          onClose={() => setAllocateFor(null)}
+          onSaved={() => { setAllocateFor(null); afterAllocationChange(); }}
+        />
+      )}
+
+      {/* ── SPLIT TRANSACTION ── */}
+      {splitFor && (
+        <SplitModal
+          transaction={splitFor}
+          categories={categories}
+          onClose={() => setSplitFor(null)}
+          onSaved={() => { setSplitFor(null); closeDetail(); afterAllocationChange(); }}
+          onCategoryCreated={(cat) => queryClient.setQueryData<Category[]>(QK.categories(), (old) => [...(old ?? []), cat])}
         />
       )}
 
