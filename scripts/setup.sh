@@ -116,6 +116,11 @@ else
   ok "Categories seeded"
 fi
 
+# Always ensure the mandatory system categories exist + are role-tagged (idempotent,
+# covers upgrades where seed is skipped because categories already exist).
+npm run db:ensure-system --silent
+ok "System categories ensured"
+
 # ── done ──────────────────────────────────────────────────────────────────────
 echo ""
 echo "${BOLD}Setup complete.${RESET}"
