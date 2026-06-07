@@ -1,15 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq, sql } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/db";
-import { transactions, categories, accounts } from "@/db/schema";
+import { transactions, categories, accounts, reimbursementAllocations } from "@/db/schema";
 import { learnMerchant, pruneOrphanMerchants } from "@/lib/categorizer/rules";
 
 const parentCat = alias(categories, "parent_cat");
-const reimbExpense = alias(transactions, "reimb_expense");
+const linkedTx = alias(transactions, "linked_tx");
 
-// Returns one transaction in the same enriched shape as the list endpoint, so the
-// detail panel can load a linked expense that falls outside the current filter range.
+// Returns one transaction with allocation rollups + both-direction allocation lists,
+// so the detail panel can render the full repayment picture (and load a linked
+// expense that falls outside the current filter range).
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -36,25 +37,47 @@ export async function GET(
       categorySource: transactions.categorySource,
       categoryConfidence: transactions.categoryConfidence,
       hidden: transactions.hidden,
-      reimbursementForId: transactions.reimbursementForId,
-      reimbursementForName: sql<string | null>`coalesce(${reimbExpense.merchantNormalized}, ${reimbExpense.description})`,
-      reimbursementForAmount: reimbExpense.amount,
-      reimbursementForPostedAt: reimbExpense.postedAt,
-      reimbursedTotal: sql<string | null>`(
-        select sum(r.amount) from ${transactions} r
-        where r.reimbursement_for_id = ${transactions.id} and r.deleted_at is null
-      )`,
+      allocatedIn: sql<string>`(select coalesce(sum(a.amount), 0) from ${reimbursementAllocations} a where a.expense_id = ${transactions.id})`,
+      allocatedOut: sql<string>`(select coalesce(sum(a.amount), 0) from ${reimbursementAllocations} a where a.repayment_id = ${transactions.id})`,
       notes: transactions.notes,
     })
     .from(transactions)
-    .leftJoin(reimbExpense, eq(transactions.reimbursementForId, reimbExpense.id))
     .leftJoin(categories, eq(transactions.categoryId, categories.id))
     .leftJoin(parentCat, eq(categories.parentId, parentCat.id))
     .leftJoin(accounts, eq(transactions.accountId, accounts.id))
     .where(eq(transactions.id, id));
 
   if (!row) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  return NextResponse.json(row);
+
+  // allocationsOut: expenses THIS row (as a repayment) covers.
+  const allocationsOut = await db
+    .select({
+      allocationId: reimbursementAllocations.id,
+      expenseId: reimbursementAllocations.expenseId,
+      amount: reimbursementAllocations.amount,
+      name: sql<string | null>`coalesce(${linkedTx.merchantNormalized}, ${linkedTx.description})`,
+      postedAt: linkedTx.postedAt,
+      txAmount: linkedTx.amount,
+    })
+    .from(reimbursementAllocations)
+    .innerJoin(linkedTx, eq(reimbursementAllocations.expenseId, linkedTx.id))
+    .where(eq(reimbursementAllocations.repaymentId, id));
+
+  // allocationsIn: repayments applied TO this row (as an expense).
+  const allocationsIn = await db
+    .select({
+      allocationId: reimbursementAllocations.id,
+      repaymentId: reimbursementAllocations.repaymentId,
+      amount: reimbursementAllocations.amount,
+      name: sql<string | null>`coalesce(${linkedTx.merchantNormalized}, ${linkedTx.description})`,
+      postedAt: linkedTx.postedAt,
+      txAmount: linkedTx.amount,
+    })
+    .from(reimbursementAllocations)
+    .innerJoin(linkedTx, eq(reimbursementAllocations.repaymentId, linkedTx.id))
+    .where(and(eq(reimbursementAllocations.expenseId, id)));
+
+  return NextResponse.json({ ...row, allocationsIn, allocationsOut });
 }
 
 export async function PATCH(
