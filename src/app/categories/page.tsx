@@ -41,6 +41,7 @@ export default function CategoriesPage() {
   const [search, setSearch] = useState("");
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [catSort, setCatSort] = useState<"name" | "spend" | "count">("name");
+  const [copied, setCopied] = useState<"text" | "json" | null>(null);
 
   // ── Query ──────────────────────────────────────────────────────────────────
 
@@ -209,6 +210,44 @@ export default function CategoriesPage() {
   const q = search.trim().toLowerCase();
   const matches = (c: Cat) => c.name.toLowerCase().includes(q);
 
+  // ── Copy / export ──────────────────────────────────────────────────────────
+
+  // Follows the current sort order. Parent lines show rolled-up numbers
+  // (what the collapsed UI shows); children show their own.
+  function buildText(): string {
+    return parents.map((p) => {
+      const roll = rollup(p);
+      const head = `${p.name} — ${roll.count} tx, ${formatCurrency(roll.total, "MYR")}`;
+      const kids = childrenOf(p.id).map((k) => `  ${k.name} — ${k.txCount} tx, ${formatCurrency(k.total, "MYR")}`);
+      return [head, ...kids].join("\n");
+    }).join("\n");
+  }
+
+  function buildJson(): string {
+    const tree = parents.map((p) => {
+      const roll = rollup(p);
+      return {
+        name: p.name,
+        color: p.color,
+        txCount: p.txCount,
+        total: p.total,
+        rolledUp: { txCount: roll.count, total: +roll.total.toFixed(2) },
+        children: childrenOf(p.id).map((k) => ({ name: k.name, color: k.color, txCount: k.txCount, total: k.total })),
+      };
+    });
+    return JSON.stringify(tree, null, 2);
+  }
+
+  async function copyAs(kind: "text" | "json") {
+    try {
+      await navigator.clipboard.writeText(kind === "text" ? buildText() : buildJson());
+      setCopied(kind);
+      setTimeout(() => setCopied(null), 1500);
+    } catch {
+      alert("Couldn't access the clipboard — your browser may be blocking it.");
+    }
+  }
+
   function toggle(id: number) {
     setExpanded((prev) => {
       const next = new Set(prev);
@@ -306,6 +345,12 @@ export default function CategoriesPage() {
         </div>
         <button onClick={expandAll} style={ghostBtn}>Expand all</button>
         <button onClick={collapseAll} style={ghostBtn}>Collapse all</button>
+        <button onClick={() => copyAs("text")} title="Copy all categories (with totals) as plain text" style={{ ...ghostBtn, color: copied === "text" ? "var(--income)" : ghostBtn.color as string }}>
+          {copied === "text" ? "✓ Copied" : "⧉ Text"}
+        </button>
+        <button onClick={() => copyAs("json")} title="Copy all categories (with totals) as JSON" style={{ ...ghostBtn, color: copied === "json" ? "var(--income)" : ghostBtn.color as string }}>
+          {copied === "json" ? "✓ Copied" : "⧉ JSON"}
+        </button>
       </div>
 
       {loading ? (
