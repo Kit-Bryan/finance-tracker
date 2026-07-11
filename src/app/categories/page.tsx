@@ -42,6 +42,7 @@ export default function CategoriesPage() {
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [catSort, setCatSort] = useState<"name" | "spend" | "count">("name");
   const [copied, setCopied] = useState<"text" | "json" | null>(null);
+  const [copyMenuOpen, setCopyMenuOpen] = useState(false);
 
   // ── Query ──────────────────────────────────────────────────────────────────
 
@@ -228,6 +229,7 @@ export default function CategoriesPage() {
   }
 
   async function copyAs(kind: "text" | "json") {
+    setCopyMenuOpen(false);
     try {
       await navigator.clipboard.writeText(kind === "text" ? buildText() : buildJson());
       setCopied(kind);
@@ -334,12 +336,35 @@ export default function CategoriesPage() {
         </div>
         <button onClick={expandAll} style={ghostBtn}>Expand all</button>
         <button onClick={collapseAll} style={ghostBtn}>Collapse all</button>
-        <button onClick={() => copyAs("text")} title="Copy all categories (with totals) as plain text" style={{ ...ghostBtn, color: copied === "text" ? "var(--income)" : ghostBtn.color as string }}>
-          {copied === "text" ? "✓ Copied" : "⧉ Text"}
-        </button>
-        <button onClick={() => copyAs("json")} title="Copy all categories (with totals) as JSON" style={{ ...ghostBtn, color: copied === "json" ? "var(--income)" : ghostBtn.color as string }}>
-          {copied === "json" ? "✓ Copied" : "⧉ JSON"}
-        </button>
+        {/* Single Copy button — format choice lives in a small dropdown */}
+        <div style={{ position: "relative" }}>
+          <button
+            onClick={() => setCopyMenuOpen((o) => !o)}
+            title="Copy the category structure to the clipboard"
+            style={{ ...ghostBtn, color: copied ? "var(--income)" : (ghostBtn.color as string) }}
+          >
+            {copied ? "✓ Copied" : "⧉ Copy"}
+          </button>
+          {copyMenuOpen && (
+            <>
+              {/* click-away backdrop */}
+              <div onClick={() => setCopyMenuOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 30 }} />
+              <div style={{ position: "absolute", top: "calc(100% + 4px)", right: 0, zIndex: 31, minWidth: 130, background: "var(--bg-2)", border: "1px solid var(--border-2)", borderRadius: 8, padding: 6, boxShadow: "0 8px 28px #00000055" }}>
+                {([["text", "As text"], ["json", "As JSON"]] as const).map(([kind, label]) => (
+                  <button
+                    key={kind}
+                    onClick={() => copyAs(kind)}
+                    style={{ display: "block", width: "100%", textAlign: "left", padding: "7px 10px", borderRadius: 5, border: "none", background: "transparent", color: "var(--text)", fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-3)")}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
       </div>
 
       {loading ? (
