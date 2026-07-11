@@ -44,14 +44,23 @@ export default function SourceViewerModal({ batchId, page, yPercent, label, onCl
     return () => { cancelled = true; };
   }, [batchId]);
 
-  // Scroll the highlighted spot into view once its page image has a real height.
-  // Uses rect math — img.offsetTop is relative to its position:relative wrapper
-  // (~0 for every page), so it can't locate the page within the pane.
+  // Scroll the highlighted spot into view — but only after EVERY page image has
+  // settled. Pages load in parallel; if the target page gets its height before an
+  // earlier page does, a scroll computed then lands wrong and the layout shifts
+  // under it once the earlier pages pop in. Waiting for all heights makes the
+  // layout final, so the target offset can't move. (Failed images count as
+  // settled so one broken page doesn't block scrolling forever.)
   function maybeScroll() {
-    if (scrolledRef.current || yPercent == null) return;
-    const img = pageRefs.current[page ?? 0];
+    if (scrolledRef.current || yPercent == null || pages.length === 0) return;
     const pane = paneRef.current;
-    if (!img || !pane || img.clientHeight === 0) return;
+    if (!pane) return;
+    const settled = (img: HTMLImageElement | null) =>
+      !!img && (img.clientHeight > 0 || (img.complete && img.naturalHeight === 0));
+    for (let i = 0; i < pages.length; i++) {
+      if (!settled(pageRefs.current[i])) return;
+    }
+    const img = pageRefs.current[page ?? 0];
+    if (!img || img.clientHeight === 0) { scrolledRef.current = true; return; } // target page failed — nothing to scroll to
     const imgRect = img.getBoundingClientRect();
     const paneRect = pane.getBoundingClientRect();
     const target = (imgRect.top - paneRect.top) + pane.scrollTop + yPercent * imgRect.height - pane.clientHeight / 2;
