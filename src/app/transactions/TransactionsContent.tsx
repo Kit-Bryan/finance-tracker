@@ -86,6 +86,12 @@ const selectStyle: React.CSSProperties = {
   color: "var(--text)", fontSize: 13, padding: "6px 10px", outline: "none", fontFamily: "inherit",
 };
 
+const monthArrowStyle: React.CSSProperties = {
+  width: 28, height: 30, borderRadius: 5, border: "1px solid var(--border-2)",
+  background: "var(--bg-3)", color: "var(--text)", fontSize: 13, cursor: "pointer",
+  display: "inline-flex", alignItems: "center", justifyContent: "center", fontFamily: "inherit", flexShrink: 0,
+};
+
 type SortKey = "date" | "merchant" | "category" | "account" | "amount";
 type HistSortKey = "date" | "file" | "account" | "rows";
 
@@ -174,6 +180,38 @@ export default function TransactionsContent() {
       setHistSort("date");
       setHistDir("desc");
     }
+  }
+
+  // Set the filter range to a whole calendar month ("YYYY-MM")
+  function applyMonth(v: string) {
+    const [y, m] = v.split("-").map(Number);
+    const lastDay = new Date(y, m, 0).getDate(); // day 0 of next month = last day of this one
+    setFilters((f) => ({ ...f, from: `${v}-01`, to: `${v}-${String(lastDay).padStart(2, "0")}` }));
+    setPage(1);
+  }
+
+  // Step a whole month back/forward. From a custom (non-month) range, anchor on
+  // the From date's month; with no usable From, anchor on the current month.
+  // Functional update so rapid consecutive clicks compound instead of reading
+  // the same stale filters and landing on the same month.
+  function stepMonth(delta: number) {
+    setFilters((f) => {
+      let base = monthValueFromRange(f.from, f.to);
+      if (!base) {
+        const m = /^(\d{4})-(\d{2})/.exec(f.from);
+        if (m) base = `${m[1]}-${m[2]}`;
+        else {
+          const now = new Date();
+          base = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+        }
+      }
+      const [y, mo] = base.split("-").map(Number);
+      const d = new Date(y, mo - 1 + delta, 1);
+      const v = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+      return { ...f, from: `${v}-01`, to: `${v}-${String(lastDay).padStart(2, "0")}` };
+    });
+    setPage(1);
   }
 
   // Build query key params object
@@ -617,24 +655,20 @@ export default function TransactionsContent() {
           {/* Filters */}
           <div className="fade-up fade-up-2" style={{ background: "var(--bg-2)", border: "1px solid var(--border)", borderRadius: 8, padding: "14px 18px", marginBottom: 14, display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
             {/* Month quick-select — fills From/To with the 1st..last day in one click.
-                Shows the month only while From/To exactly span one; manual edits blank it. */}
+                Shows the month only while From/To exactly span one; manual edits blank it.
+                Arrows step a whole month at a time. */}
             <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
               <label style={labelStyle}>Month</label>
-              <input
-                type="month"
-                value={monthValueFromRange(filters.from, filters.to)}
-                onChange={(e) => {
-                  const v = e.target.value; // "YYYY-MM" or "" when cleared
-                  if (!v) return;
-                  const [y, m] = v.split("-").map(Number);
-                  const from = `${v}-01`;
-                  const to = new Date(y, m, 0); // day 0 of next month = last day of this one
-                  const toStr = `${v}-${String(to.getDate()).padStart(2, "0")}`;
-                  setFilters((f) => ({ ...f, from, to: toStr }));
-                  setPage(1);
-                }}
-                style={selectStyle}
-              />
+              <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                <button onClick={() => stepMonth(-1)} title="Previous month" style={monthArrowStyle}>←</button>
+                <input
+                  type="month"
+                  value={monthValueFromRange(filters.from, filters.to)}
+                  onChange={(e) => { if (e.target.value) applyMonth(e.target.value); }}
+                  style={selectStyle}
+                />
+                <button onClick={() => stepMonth(1)} title="Next month" style={monthArrowStyle}>→</button>
+              </div>
             </div>
             <FilterInput label="From" type="date" value={filters.from} onChange={(v) => { setFilters((f) => ({ ...f, from: v })); setPage(1); }} />
             <FilterInput label="To" type="date" value={filters.to} onChange={(v) => { setFilters((f) => ({ ...f, to: v })); setPage(1); }} />
