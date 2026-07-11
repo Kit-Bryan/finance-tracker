@@ -40,6 +40,7 @@ export default function CategoriesPage() {
   const [newName, setNewName] = useState("");
   const [search, setSearch] = useState("");
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const [catSort, setCatSort] = useState<"name" | "spend" | "count">("name");
 
   // ── Query ──────────────────────────────────────────────────────────────────
 
@@ -184,8 +185,12 @@ export default function CategoriesPage() {
 
   // ── Derived ────────────────────────────────────────────────────────────────
 
-  const parents = cats.filter((c) => !c.parentId).sort((a, b) => a.name.localeCompare(b.name));
-  const childrenOf = (id: number) => cats.filter((c) => c.parentId === id).sort((a, b) => a.name.localeCompare(b.name));
+  // Children sort with the same key as parents so the ordering feels coherent.
+  const kidCmp = (a: Cat, b: Cat) =>
+    catSort === "spend" ? a.total - b.total       // most spent (most negative) first
+    : catSort === "count" ? b.txCount - a.txCount // busiest first
+    : a.name.localeCompare(b.name);
+  const childrenOf = (id: number) => cats.filter((c) => c.parentId === id).sort(kidCmp);
 
   function rollup(parent: Cat) {
     const kids = childrenOf(parent.id);
@@ -193,6 +198,13 @@ export default function CategoriesPage() {
     const total = parent.total + kids.reduce((s, k) => s + k.total, 0);
     return { count, total, kidCount: kids.length };
   }
+
+  // Parents sort by their rolled-up numbers (own + children)
+  const parents = cats.filter((c) => !c.parentId).sort((a, b) =>
+    catSort === "spend" ? rollup(a).total - rollup(b).total
+    : catSort === "count" ? rollup(b).count - rollup(a).count
+    : a.name.localeCompare(b.name)
+  );
 
   const q = search.trim().toLowerCase();
   const matches = (c: Cat) => c.name.toLowerCase().includes(q);
@@ -272,9 +284,26 @@ export default function CategoriesPage() {
         <button onClick={() => { setCreating({ parentId: null }); setNewName(""); }} style={primaryBtn(false)}>+ New category</button>
       </div>
 
-      {/* Toolbar: search + expand/collapse */}
+      {/* Toolbar: search + sort + expand/collapse */}
       <div className="fade-up fade-up-2" style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 14 }}>
         <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search categories…" style={{ ...inputStyle, flex: 1 }} />
+        {/* Sort segmented control */}
+        <div style={{ display: "flex", border: "1px solid var(--border-2)", borderRadius: 6, overflow: "hidden" }}>
+          {([["name", "A–Z"], ["spend", "Spending"], ["count", "Activity"]] as const).map(([key, label]) => (
+            <button
+              key={key}
+              onClick={() => setCatSort(key)}
+              title={key === "spend" ? "Most spent first" : key === "count" ? "Most transactions first" : "Alphabetical"}
+              style={{
+                padding: "8px 12px", border: "none", fontSize: 12, cursor: "pointer", fontFamily: "inherit",
+                background: catSort === key ? "var(--accent-dim)" : "transparent",
+                color: catSort === key ? "var(--accent)" : "var(--text-muted)",
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
         <button onClick={expandAll} style={ghostBtn}>Expand all</button>
         <button onClick={collapseAll} style={ghostBtn}>Collapse all</button>
       </div>
