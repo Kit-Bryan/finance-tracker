@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq, isNull } from "drizzle-orm";
+import { eq, isNull, and, ne, desc, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { transactions, categories } from "@/db/schema";
 import { getAIClient, DEFAULT_MODEL } from "@/lib/ai/client";
@@ -22,6 +22,26 @@ export async function POST(
   const cat = allCats.find((c) => c.id === tx.categoryId);
   const ai = getAIClient();
 
+  // Past notes on the same merchant/counterparty — the best signal for phrasing
+  // and recurring context (e.g. this person's transfers are usually allowances).
+  let historyBlock = "";
+  if (tx.merchantNormalized) {
+    const history = await db
+      .select({ description: transactions.description, notes: transactions.notes })
+      .from(transactions)
+      .where(and(
+        ne(transactions.id, txId),
+        isNull(transactions.deletedAt),
+        sql`lower(${transactions.merchantNormalized}) = lower(${tx.merchantNormalized})`,
+        sql`coalesce(${transactions.notes}, '') <> ''`,
+      ))
+      .orderBy(desc(transactions.updatedAt))
+      .limit(5);
+    if (history.length > 0) {
+      historyBlock = `\nPast transactions with the SAME counterparty and their notes (reuse this context and phrasing when the new transaction is similar — but let the new transaction's own remark win when it says something different):\n${history.map((h) => `  "${h.description}" → "${h.notes}"`).join("\n")}\n`;
+    }
+  }
+
   const prompt = `Write a concise plain-English note (6–10 words) for this Malaysian bank transaction.
 Your goal is to extract the most useful human-readable context from the raw description — especially
 any remarks, names, purposes, or references to what the money was for.
@@ -32,6 +52,7 @@ Raw bank description: "${tx.description}"
 Merchant: ${tx.merchantNormalized ?? "unknown"}
 Category: ${cat?.name ?? "uncategorized"}
 Amount: MYR ${Math.abs(parseFloat(tx.amount as string))} (${parseFloat(tx.amount as string) < 0 ? "expense" : "income"})
+${historyBlock}
 
 Good examples (extract the meaningful remark, name, or purpose):
 - "Meal allowance from Wong Hon Sun"
