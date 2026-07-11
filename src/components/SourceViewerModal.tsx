@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 interface Props {
   batchId: number;
@@ -78,7 +79,10 @@ export default function SourceViewerModal({ batchId, page, yPercent, label, onCl
 
   const hasHighlight = yPercent != null;
 
-  return (
+  // Portal to <body>: ancestors with transforms (e.g. the fade-up animation on
+  // dashboard panels) would otherwise become the containing block for this
+  // fixed-position overlay and squash it into the panel.
+  return createPortal(
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "#000000aa", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 120 }}>
       <div onClick={(e) => e.stopPropagation()} style={{
         background: "var(--bg-2)", border: "1px solid var(--border-2)", borderRadius: 10,
@@ -133,6 +137,7 @@ export default function SourceViewerModal({ batchId, page, yPercent, label, onCl
           ))}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

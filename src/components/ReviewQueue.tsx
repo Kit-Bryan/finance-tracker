@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { formatCurrency } from "@/lib/format";
 import CategoryCombobox, { Category, CategoryValue } from "./CategoryCombobox";
 import AllocationEditor from "./AllocationEditor";
+import SourceViewerModal from "./SourceViewerModal";
 
 interface FlaggedTx {
   id: number;
@@ -17,6 +18,11 @@ interface FlaggedTx {
   categorySource: string | null;
   categoryConfidence: string | null;
   accountName: string | null;
+  // Source trace-back
+  batchId: number | null;
+  batchStoredFile: string | null;
+  sourcePage: number | null;
+  sourceYPercent: number | null;
 }
 
 interface AISuggestion {
@@ -71,6 +77,7 @@ export default function ReviewQueue({ categories, onResolved, onCategoryCreated 
   const [aiSuggestions, setAiSuggestions] = useState<Record<number, AISuggestion>>({});
   const [suggesting, setSuggesting] = useState<Record<number, boolean>>({});
   const [reimburseFor, setReimburseFor] = useState<FlaggedTx | null>(null);
+  const [sourceFor, setSourceFor] = useState<FlaggedTx | null>(null);
 
   const fetchQueue = async () => {
     const data = await fetch("/api/review-queue").then((r) => r.json());
@@ -324,6 +331,19 @@ export default function ReviewQueue({ categories, onResolved, onCategoryCreated 
 
                   {/* Actions */}
                   <div style={{ display: "flex", gap: 6, paddingTop: 1 }}>
+                    {tx.batchStoredFile && (
+                      <button
+                        onClick={() => setSourceFor(tx)}
+                        title="See where this appears in the original statement"
+                        style={{
+                          padding: "5px 10px", borderRadius: 5,
+                          border: "1px solid var(--border-2)", background: "transparent",
+                          color: "var(--text-muted)", fontSize: 12, cursor: "pointer",
+                        }}
+                      >
+                        📄
+                      </button>
+                    )}
                     <button
                       onClick={() => resolve(tx.id)}
                       disabled={saving === tx.id || !selected}
@@ -392,6 +412,16 @@ export default function ReviewQueue({ categories, onResolved, onCategoryCreated 
           repayment={reimburseFor}
           onClose={() => setReimburseFor(null)}
           onSaved={onAllocationsSaved}
+        />
+      )}
+
+      {sourceFor && sourceFor.batchId != null && (
+        <SourceViewerModal
+          batchId={sourceFor.batchId}
+          page={sourceFor.sourcePage}
+          yPercent={sourceFor.sourceYPercent}
+          label={`${sourceFor.merchantNormalized || sourceFor.description} · ${formatCurrency(parseFloat(sourceFor.amount), "MYR")}`}
+          onClose={() => setSourceFor(null)}
         />
       )}
     </div>

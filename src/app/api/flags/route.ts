@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
-import { flags, transactions, categories, accounts, reimbursementAllocations } from "@/db/schema";
+import { flags, transactions, categories, accounts, importBatches, reimbursementAllocations } from "@/db/schema";
 import { eq, inArray, desc, sql } from "drizzle-orm";
 import { CONFIDENCE_THRESHOLD } from "@/lib/ai/constants";
 
@@ -31,11 +31,17 @@ export async function GET() {
       categoryName: categories.name,
       categoryColor: categories.color,
       accountName: accounts.name,
+      // Source trace-back: lets the dashboard cards open the original statement
+      batchId: transactions.batchId,
+      batchStoredFile: importBatches.storedFile,
+      sourcePage: sql<number | null>`(${transactions.rawRow}->>'page')::int`,
+      sourceYPercent: sql<number | null>`(${transactions.rawRow}->>'yPercent')::float`,
     })
     .from(flags)
     .innerJoin(transactions, eq(flags.transactionId, transactions.id))
     .leftJoin(categories, eq(transactions.categoryId, categories.id))
     .leftJoin(accounts, eq(transactions.accountId, accounts.id))
+    .leftJoin(importBatches, eq(transactions.batchId, importBatches.id))
     .where(eq(flags.status, "open"))
     .orderBy(desc(flags.createdAt));
 
@@ -89,6 +95,10 @@ export async function GET() {
       categoryName: f.categoryName,
       categoryColor: f.categoryColor,
       accountName: f.accountName,
+      batchId: f.batchId,
+      batchStoredFile: f.batchStoredFile,
+      sourcePage: f.sourcePage,
+      sourceYPercent: f.sourceYPercent,
     }))
   );
 }

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { formatCurrency } from "@/lib/format";
 import CategoryCombobox, { Category, CategoryValue } from "./CategoryCombobox";
+import SourceViewerModal from "./SourceViewerModal";
 
 interface ReimbursementCandidate {
   id: number;
@@ -34,6 +35,11 @@ interface Flag {
   categoryName: string | null;
   categoryColor: string | null;
   accountName: string | null;
+  // Source trace-back
+  batchId: number | null;
+  batchStoredFile: string | null;
+  sourcePage: number | null;
+  sourceYPercent: number | null;
 }
 
 export default function NeedsAttention() {
@@ -43,6 +49,7 @@ export default function NeedsAttention() {
   const [busy, setBusy] = useState<number | null>(null);
   const [selections, setSelections] = useState<Record<number, CategoryValue | null>>({});
   const [expanded, setExpanded] = useState(true);
+  const [sourceFor, setSourceFor] = useState<Flag | null>(null);
 
   async function load() {
     // Scan first (idempotent) so existing data surfaces, then fetch
@@ -142,6 +149,9 @@ export default function NeedsAttention() {
                 </div>
 
                 <div style={{ display: "flex", gap: 8 }}>
+                  {flag.batchStoredFile && (
+                    <button onClick={() => setSourceFor(flag)} title="See where this appears in the original statement" style={ghostBtn}>📄</button>
+                  )}
                   <button onClick={() => linkReimbursement(flag)} disabled={busy === flag.id} style={primaryBtn(busy === flag.id)}>
                     {busy === flag.id ? "Linking…" : "Link reimbursements"}
                   </button>
@@ -180,6 +190,9 @@ export default function NeedsAttention() {
                   />
                 </div>
                 <div style={{ display: "flex", gap: 6 }}>
+                  {flag.batchStoredFile && (
+                    <button onClick={() => setSourceFor(flag)} title="See where this appears in the original statement" style={ghostBtn}>📄</button>
+                  )}
                   <button onClick={() => categorize(flag)} disabled={busy === flag.id || !selected} style={primaryBtn(busy === flag.id || !selected)}>
                     {busy === flag.id ? "…" : "Confirm"}
                   </button>
@@ -189,6 +202,16 @@ export default function NeedsAttention() {
             );
           })}
         </div>
+      )}
+
+      {sourceFor && sourceFor.batchId != null && (
+        <SourceViewerModal
+          batchId={sourceFor.batchId}
+          page={sourceFor.sourcePage}
+          yPercent={sourceFor.sourceYPercent}
+          label={`${sourceFor.merchantNormalized || sourceFor.description} · ${formatCurrency(parseFloat(sourceFor.amount), "MYR")}`}
+          onClose={() => setSourceFor(null)}
+        />
       )}
     </div>
   );

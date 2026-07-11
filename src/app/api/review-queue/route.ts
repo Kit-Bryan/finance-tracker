@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
-import { transactions, categories, accounts, reimbursementAllocations } from "@/db/schema";
+import { transactions, categories, accounts, importBatches, reimbursementAllocations } from "@/db/schema";
 import { eq, and, isNull, lt, or, sql } from "drizzle-orm";
 import { CONFIDENCE_THRESHOLD } from "@/lib/ai/constants";
 
@@ -20,10 +20,16 @@ export async function GET() {
       categorySource: transactions.categorySource,
       categoryConfidence: transactions.categoryConfidence,
       accountName: accounts.name,
+      // Source trace-back: lets the review UI open the original statement
+      batchId: transactions.batchId,
+      batchStoredFile: importBatches.storedFile,
+      sourcePage: sql<number | null>`(${transactions.rawRow}->>'page')::int`,
+      sourceYPercent: sql<number | null>`(${transactions.rawRow}->>'yPercent')::float`,
     })
     .from(transactions)
     .leftJoin(categories, eq(transactions.categoryId, categories.id))
     .leftJoin(accounts, eq(transactions.accountId, accounts.id))
+    .leftJoin(importBatches, eq(transactions.batchId, importBatches.id))
     .where(
       and(
         isNull(transactions.deletedAt),
