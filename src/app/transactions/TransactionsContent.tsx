@@ -147,22 +147,32 @@ export default function TransactionsContent() {
   const [histDir, setHistDir] = useState<"asc" | "desc">("desc");
   const LIMIT = 50;
 
+  // Tri-state: 1st click sorts (numbers big-first, text A–Z), 2nd flips,
+  // 3rd clears back to the natural order (date, newest first).
   function toggleSort(key: SortKey) {
-    if (sortBy === key) {
-      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    } else {
+    const defaultDir = key === "date" || key === "amount" ? "desc" : "asc";
+    if (sortBy !== key) {
       setSortBy(key);
-      setSortDir(key === "date" || key === "amount" ? "desc" : "asc"); // numbers: big first; text: A–Z
+      setSortDir(defaultDir);
+    } else if (sortDir === defaultDir) {
+      setSortDir(defaultDir === "asc" ? "desc" : "asc");
+    } else {
+      setSortBy("date");
+      setSortDir("desc");
     }
     setPage(1);
   }
 
   function toggleHistSort(key: HistSortKey) {
-    if (histSort === key) {
-      setHistDir((d) => (d === "asc" ? "desc" : "asc"));
-    } else {
+    const defaultDir = key === "date" || key === "rows" ? "desc" : "asc";
+    if (histSort !== key) {
       setHistSort(key);
-      setHistDir(key === "date" || key === "rows" ? "desc" : "asc");
+      setHistDir(defaultDir);
+    } else if (histDir === defaultDir) {
+      setHistDir(defaultDir === "asc" ? "desc" : "asc");
+    } else {
+      setHistSort("date");
+      setHistDir("desc");
     }
   }
 
@@ -677,7 +687,7 @@ export default function TransactionsContent() {
                         <th
                           key={i}
                           onClick={key ? () => toggleSort(key) : undefined}
-                          title={key ? "Sort by this column" : undefined}
+                          title={key ? "Click to sort · again to flip · third click resets" : undefined}
                           style={{
                             padding: "10px 16px", textAlign: h === "Amount" ? "right" : "left",
                             fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase",
@@ -841,7 +851,7 @@ export default function TransactionsContent() {
                       <th
                         key={i}
                         onClick={key ? () => toggleHistSort(key) : undefined}
-                        title={key ? "Sort by this column" : undefined}
+                        title={key ? "Click to sort · again to flip · third click resets" : undefined}
                         style={{ padding: "10px 20px", textAlign: "left", fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: active ? "var(--accent)" : "var(--text-muted)", fontWeight: active ? 600 : 500, cursor: key ? "pointer" : "default", userSelect: "none", whiteSpace: "nowrap" }}
                       >
                         {h}{active && <span style={{ marginLeft: 4 }}>{histDir === "asc" ? "▲" : "▼"}</span>}
