@@ -35,6 +35,10 @@ export async function getNoteExamples(limit = 15): Promise<NoteExample[]> {
   for (const r of rows) {
     const key = (r.merchant || r.description).trim().toLowerCase();
     if (!key || seen.has(key) || !r.notes?.trim()) continue;
+    // Skip generic merchants (Fund Transfer, GrabPay, DuitNow…): their notes carry
+    // a per-transaction counterparty/purpose that must NOT be copied onto the next
+    // one — e.g. "Fund Transfer → Jing Hao" would get stamped on an unrelated transfer.
+    if (isGenericMerchant(normalizeMerchant(r.description)) || isGenericMerchant(normalizeMerchant(r.merchant || ""))) continue;
     seen.add(key);
     out.push({ description: r.description, note: r.notes.trim() });
     if (out.length >= limit) break;

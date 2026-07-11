@@ -69,7 +69,9 @@ Rules:
 - REAL TRANSFERS BETWEEN THE USER'S OWN ACCOUNTS/WALLETS are also "Transfer" and must always be kept (never dropped): e.g. Maybank → Touch 'n Go, Touch 'n Go → Maybank, bank-to-wallet top-ups, reloads funded "from [a bank/card]". These are real money movements but are neither income nor spending.
 - Do NOT blanket-classify every "Fund Transfer" as "Transfer": a transfer to/from another PERSON (a human name, e.g. an allowance or repayment) can be real income or a real expense — judge by context. Reserve "Transfer" for the user's OWN-account movements and GO+ internal legs.
 - Use "Treats & Meals" when a transaction is clearly paying for someone else's food/drinks (e.g. group dinners where one person pays). Use "Gifts" for presents, "Donations" for charities, "Tithe / Offering" for religious giving.
-- note: 1 short sentence in plain English describing what this transaction is about. Focus on WHO or WHAT, not technical details. NEVER include reference numbers, transaction IDs, or random alphanumeric codes. Examples:
+- note: 1 short sentence in plain English describing what this transaction is about. Focus on WHO or WHAT, not technical details. NEVER include reference numbers, transaction IDs, or random alphanumeric codes.
+- CRITICAL — do NOT hallucinate: NEVER put a person's name, merchant, place, or purpose in a note unless it appears VERBATIM in THAT transaction's own description. The notes examples above are ONLY a phrasing guide — never copy a name or specific detail from them onto a different transaction. A generic "Fund Transfer" with no name in its description must get a note with no name (e.g. just "Fund transfer").
+  Examples:
   "FUND TRANSFER TO A/ – WONG HON SUN – Meal Allowance Aug 25" → "Meal allowance from Wong Hon Sun"
   "PYMT FROM A/C – GRABPAY MALAYSIA – xyz123" → "GrabPay payment"
   "OPENAI *CHATGPT SUB – SAN FRANCISCO" → "ChatGPT subscription"

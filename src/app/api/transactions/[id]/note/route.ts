@@ -3,6 +3,7 @@ import { eq, isNull, and, ne, desc, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { transactions, categories } from "@/db/schema";
 import { getAIClient, DEFAULT_MODEL } from "@/lib/ai/client";
+import { normalizeMerchant, isGenericMerchant } from "@/lib/categorizer/rules";
 
 export async function POST(
   _req: NextRequest,
@@ -24,8 +25,10 @@ export async function POST(
 
   // Past notes on the same merchant/counterparty — the best signal for phrasing
   // and recurring context (e.g. this person's transfers are usually allowances).
+  // Skip generic merchants: "Fund Transfer"/"GrabPay" is not a stable counterparty,
+  // so its past notes describe DIFFERENT people/purposes and must not be reused.
   let historyBlock = "";
-  if (tx.merchantNormalized) {
+  if (tx.merchantNormalized && !isGenericMerchant(normalizeMerchant(tx.merchantNormalized)) && !isGenericMerchant(normalizeMerchant(tx.description))) {
     const history = await db
       .select({ description: transactions.description, notes: transactions.notes })
       .from(transactions)
@@ -47,6 +50,11 @@ Your goal is to extract the most useful human-readable context from the raw desc
 any remarks, names, purposes, or references to what the money was for.
 Ignore transaction IDs, reference numbers, and random alphanumeric codes entirely.
 If the raw description contains no useful context beyond the merchant name, return an empty string.
+
+CRITICAL — do NOT hallucinate: NEVER include a person's name, merchant, place, or purpose
+that does not appear VERBATIM in THIS transaction's own raw description below. The past-transaction
+examples are ONLY a guide for tone/phrasing — never copy a name or specific detail out of them onto
+this transaction. If this description has no name, your note must have no name.
 
 Raw bank description: "${tx.description}"
 Merchant: ${tx.merchantNormalized ?? "unknown"}
