@@ -26,12 +26,16 @@ export default function SourceViewerModal({ batchId, page, yPercent, label, onCl
 
   useEffect(() => {
     let cancelled = false;
+    // Metadata only — the pages themselves are served as real images from the
+    // server-side render cache, so the browser can cache them too. The ?v=
+    // token (file mtime) busts caches when a statement is re-synced.
     fetch(`/api/import-batches/${batchId}/pages`)
       .then(async (r) => {
         const data = await r.json();
         if (cancelled) return;
         if (!r.ok) { setError(data.error ?? "Could not load the source document"); setLoading(false); return; }
-        setPages(data.pages ?? []);
+        const count: number = data.pageCount ?? 0;
+        setPages(Array.from({ length: count }, (_, i) => `/api/import-batches/${batchId}/pages/${i}?v=${data.version ?? 0}`));
         setFilename(data.filename ?? "");
         setLoading(false);
       })

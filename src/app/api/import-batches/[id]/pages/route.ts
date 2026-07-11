@@ -3,11 +3,15 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { importBatches } from "@/db/schema";
 import { renderPdfToImages } from "@/lib/parsers/render";
-import { readBatchFile, isPdfFile, isImageFile, mimeFor } from "@/lib/uploads";
+import {
+  readBatchFile, isPdfFile, isImageFile,
+  cachePages, cachedPageCount, storedFileVersion,
+} from "@/lib/uploads";
 import { logger } from "@/lib/logger";
 
-// Rasterized pages of a batch's stored original statement, for the source
-// trace-back viewer. PDFs render via poppler; images are returned as one page.
+// Metadata for the source viewer: page count + a cache-busting version token.
+// PDFs are rasterized ONCE into uploads/pages/<batchId>/ — subsequent opens hit
+// that cache (and the browser's, via the immutable page-image URLs).
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -22,27 +26,38 @@ export async function GET(
     return NextResponse.json({ error: "No original file stored for this import" }, { status: 404 });
   }
 
-  let buffer: Buffer;
-  try {
-    buffer = await readBatchFile(batch.storedFile);
-  } catch {
-    return NextResponse.json({ error: "Stored file is missing from disk" }, { status: 404 });
+  const version = await storedFileVersion(batch.storedFile);
+
+  // Images are served directly as a single "page" — nothing to rasterize.
+  if (isImageFile(batch.storedFile)) {
+    return NextResponse.json({ filename: batch.filename, pageCount: 1, version });
   }
 
-  if (isPdfFile(batch.storedFile)) {
+  if (!isPdfFile(batch.storedFile)) {
+    return NextResponse.json({ error: "Stored file type has no visual pages (e.g. CSV)" }, { status: 422 });
+  }
+
+  let pageCount = await cachedPageCount(batchId);
+  if (pageCount === 0) {
+    // First open since the file was stored/replaced — render and cache.
+    let buffer: Buffer;
     try {
-      const r = await renderPdfToImages(buffer);
-      return NextResponse.json({ filename: batch.filename, pages: r.images, truncated: r.truncated });
+      buffer = await readBatchFile(batch.storedFile);
+    } catch {
+      return NextResponse.json({ error: "Stored file is missing from disk" }, { status: 404 });
+    }
+    try {
+      const t0 = Date.now();
+      const r = await renderPdfToImages(buffer, { dpi: 150 }); // viewing resolution — half the payload of 200
+      const pngs = r.images.map((dataUrl) => Buffer.from(dataUrl.replace(/^data:image\/png;base64,/, ""), "base64"));
+      await cachePages(batchId, pngs);
+      pageCount = pngs.length;
+      log.info({ batchId, pageCount, ms: Date.now() - t0 }, "rendered and cached statement pages");
     } catch (err) {
       log.error({ err, batchId }, "failed to rasterize stored PDF");
       return NextResponse.json({ error: "PDF renderer unavailable" }, { status: 502 });
     }
   }
 
-  if (isImageFile(batch.storedFile)) {
-    const dataUrl = `data:${mimeFor(batch.storedFile)};base64,${buffer.toString("base64")}`;
-    return NextResponse.json({ filename: batch.filename, pages: [dataUrl] });
-  }
-
-  return NextResponse.json({ error: "Stored file type has no visual pages (e.g. CSV)" }, { status: 422 });
+  return NextResponse.json({ filename: batch.filename, pageCount, version });
 }

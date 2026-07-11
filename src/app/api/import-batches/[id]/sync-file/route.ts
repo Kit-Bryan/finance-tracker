@@ -5,7 +5,7 @@ import { importBatches, transactions } from "@/db/schema";
 import { extractPdfTextBoxes } from "@/lib/parsers/render";
 import { matchTransactionsToLines } from "@/lib/parsers/locate";
 import { mapTransactionsToLines } from "@/lib/ai/parse";
-import { saveBatchFile, deleteBatchFile, isPdfFile } from "@/lib/uploads";
+import { saveBatchFile, deleteBatchFile, clearCachedPages, isPdfFile } from "@/lib/uploads";
 import { logger } from "@/lib/logger";
 
 // Attach (or replace) the original statement file on an EXISTING batch, then
@@ -28,8 +28,9 @@ export async function POST(
 
   const buffer = Buffer.from(await file.arrayBuffer());
 
-  // Replace any previously stored file
+  // Replace any previously stored file (and drop stale rendered-page cache)
   await deleteBatchFile(batch.storedFile);
+  await clearCachedPages(batchId);
   const stored = await saveBatchFile(batchId, file.name, buffer);
   await db.update(importBatches).set({ storedFile: stored }).where(eq(importBatches.id, batchId));
 
