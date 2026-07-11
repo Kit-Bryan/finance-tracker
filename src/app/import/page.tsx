@@ -207,10 +207,14 @@ export default function ImportPage() {
     }
 
     try {
+      // Multipart: payload JSON + the original file, stored server-side so
+      // transactions can be traced back to their spot in the statement.
+      const fd = new FormData();
+      fd.append("payload", JSON.stringify(body));
+      fd.append("file", file);
       const res = await fetch("/api/import-confirm", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: fd,
       });
       const data = await res.json();
       if (!res.ok) { setParseError(data.error ?? "Import failed"); setConfirming(false); return; }

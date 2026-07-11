@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { formatCurrency, startOfMonth, today, formatTxDate, formatTxTime } from "@/lib/format";
 import ReviewQueue from "@/components/ReviewQueue";
@@ -11,6 +11,7 @@ import TransactionEditPanel, { DetailTransaction } from "@/components/Transactio
 import ConfirmDialog from "@/components/ConfirmDialog";
 import AllocationEditor from "@/components/AllocationEditor";
 import SplitModal from "@/components/SplitModal";
+import SourceViewerModal from "@/components/SourceViewerModal";
 import {
   useQuery,
   useMutation,
@@ -38,6 +39,11 @@ interface Transaction {
   allocationCount: number;       // how many expenses this repayment covers
   primaryTargetName: string | null;
   notes: string | null;
+  // Source trace-back
+  batchId: number | null;
+  batchStoredFile: string | null;
+  sourcePage: number | null;
+  sourceYPercent: number | null;
 }
 
 interface Category { id: number; name: string; color: string | null; parentId: number | null; isTransfer?: boolean; }
@@ -60,6 +66,7 @@ interface TrashItem {
 interface ImportBatch {
   id: number;
   filename: string;
+  storedFile: string | null;
   status: string;
   importedRows: number | null;
   createdAt: string;
@@ -116,6 +123,9 @@ export default function TransactionsContent() {
   const [agentContext, setAgentContext] = useState<ContextTransaction | null>(null);
   const [moreOpen, setMoreOpen] = useState(false);   // header "⋯ More" menu
   const [kebabFor, setKebabFor] = useState<number | null>(null);  // per-row "⋯" menu
+  const [sourceFor, setSourceFor] = useState<Transaction | null>(null); // source trace-back viewer
+  const [syncBatchId, setSyncBatchId] = useState<number | null>(null);  // batch awaiting a PDF via the hidden input
+  const syncFileRef = useRef<HTMLInputElement>(null);
   const LIMIT = 50;
 
   // Build query key params object
@@ -341,6 +351,30 @@ export default function TransactionsContent() {
     mutationFn: (batchId: number) =>
       fetch(`/api/import-batches/${batchId}`, { method: "DELETE" }).then((r) => r.json()),
     onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: QK.batches() });
+      queryClient.invalidateQueries({ queryKey: ['transactions'] });
+    },
+  });
+
+  // Attach the original statement PDF to an existing batch (source trace-back
+  // for imports made before file storage existed). Re-derives row positions.
+  const syncFileMutation = useMutation({
+    mutationFn: async ({ batchId, file }: { batchId: number; file: File }) => {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch(`/api/import-batches/${batchId}/sync-file`, { method: "POST", body: fd });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Sync failed");
+      return data as { located: number; transactions: number };
+    },
+    onSuccess: (data) => {
+      setBulkResult(`Statement attached — located ${data.located} of ${data.transactions} transactions on the document`);
+    },
+    onError: (err: Error) => {
+      setBulkResult(`Sync failed: ${err.message}`);
+    },
+    onSettled: () => {
+      setSyncBatchId(null);
       queryClient.invalidateQueries({ queryKey: QK.batches() });
       queryClient.invalidateQueries({ queryKey: ['transactions'] });
     },
@@ -664,6 +698,11 @@ export default function TransactionsContent() {
                             </button>
                             {kebabFor === tx.id && (
                               <div style={{ position: "absolute", top: "calc(100% + 4px)", right: 0, zIndex: 40, minWidth: 150, background: "var(--bg-2)", border: "1px solid var(--border-2)", borderRadius: 8, padding: 6, boxShadow: "0 8px 28px #00000055", textAlign: "left" }}>
+                                {tx.batchStoredFile && (
+                                  <MenuItem onClick={() => { setSourceFor(tx); setKebabFor(null); }}>
+                                    📄 View in statement
+                                  </MenuItem>
+                                )}
                                 <MenuItem onClick={() => { toggleHiddenMutation.mutate({ id: tx.id, hidden: !tx.hidden }); setKebabFor(null); }}>
                                   {tx.hidden ? "Unhide" : "Hide from list"}
                                 </MenuItem>
@@ -717,7 +756,10 @@ export default function TransactionsContent() {
                     <td style={{ padding: "12px 20px", fontSize: 12, color: "var(--text-muted)", fontFamily: "var(--font-ibm-mono)", whiteSpace: "nowrap" }}>
                       {new Date(b.createdAt).toLocaleDateString("en-MY", { day: "numeric", month: "short", year: "numeric" })}
                     </td>
-                    <td style={{ padding: "12px 20px", fontSize: 13, color: "var(--text)" }}>{b.filename}</td>
+                    <td style={{ padding: "12px 20px", fontSize: 13, color: "var(--text)" }}>
+                      {b.filename}
+                      {b.storedFile && <span title="Original statement stored — transactions can be traced back to it" style={{ marginLeft: 6, fontSize: 11 }}>📄</span>}
+                    </td>
                     <td style={{ padding: "12px 20px", fontSize: 12, color: "var(--text-muted)" }}>{b.accountName ?? "—"}</td>
                     <td style={{ padding: "12px 20px", fontSize: 13, fontFamily: "var(--font-ibm-mono)", color: "var(--income)" }}>{b.importedRows ?? 0}</td>
                     <td style={{ padding: "12px 20px" }}>
@@ -725,7 +767,15 @@ export default function TransactionsContent() {
                         {b.status}
                       </span>
                     </td>
-                    <td style={{ padding: "12px 16px" }}>
+                    <td style={{ padding: "12px 16px", whiteSpace: "nowrap" }}>
+                      <button
+                        onClick={() => { setSyncBatchId(b.id); syncFileRef.current?.click(); }}
+                        disabled={syncFileMutation.isPending}
+                        title={b.storedFile ? "Replace the stored statement and re-derive positions" : "Attach the original statement so transactions can be traced back to it"}
+                        style={{ background: "none", border: "1px solid var(--border-2)", borderRadius: 4, color: "var(--accent)", fontSize: 11, padding: "3px 10px", cursor: "pointer", marginRight: 6, opacity: (syncFileMutation.isPending && syncBatchId === b.id) ? 0.4 : 1 }}
+                      >
+                        {syncFileMutation.isPending && syncBatchId === b.id ? "Syncing…" : b.storedFile ? "Re-sync PDF" : "Attach PDF"}
+                      </button>
                       <button
                         onClick={() => deleteBatch(b.id)}
                         disabled={deleteBatchMutation.isPending && deleteBatchMutation.variables === b.id}
@@ -871,6 +921,29 @@ export default function TransactionsContent() {
         onConfirm={confirmDeleteTransaction}
         onCancel={() => setConfirmDelete(null)}
       />
+
+      {/* ── SOURCE TRACE-BACK ── */}
+      {/* Hidden input for the History tab's Attach/Re-sync PDF buttons */}
+      <input
+        ref={syncFileRef}
+        type="file"
+        accept=".pdf,.png,.jpg,.jpeg,.webp,application/pdf,image/*"
+        style={{ display: "none" }}
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f && syncBatchId != null) syncFileMutation.mutate({ batchId: syncBatchId, file: f });
+          e.target.value = ""; // allow re-picking the same file
+        }}
+      />
+      {sourceFor && sourceFor.batchId != null && (
+        <SourceViewerModal
+          batchId={sourceFor.batchId}
+          page={sourceFor.sourcePage}
+          yPercent={sourceFor.sourceYPercent}
+          label={`${sourceFor.merchantNormalized || sourceFor.description} · ${formatCurrency(parseFloat(sourceFor.amount), "MYR")}`}
+          onClose={() => setSourceFor(null)}
+        />
+      )}
 
       {/* ── AGENT CHAT ── */}
       <AgentChat
