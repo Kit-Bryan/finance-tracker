@@ -53,10 +53,12 @@ function monthLabel(key: string) {
 }
 
 function monthRange(key: string) {
+  // Build strings directly — going through Date.toISOString() converts local
+  // midnight to UTC, which in UTC+8 shifts the range back a day (March 31
+  // leaking into April, April 30 leaking into May).
   const [y, m] = key.split("-").map(Number);
-  const from = new Date(y, m - 1, 1).toISOString().slice(0, 10);
-  const to = new Date(y, m, 0).toISOString().slice(0, 10); // last day of month
-  return { from, to };
+  const lastDay = new Date(y, m, 0).getDate();
+  return { from: `${key}-01`, to: `${key}-${String(lastDay).padStart(2, "0")}` };
 }
 
 function shiftMonth(key: string, delta: number) {

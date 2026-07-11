@@ -10,6 +10,9 @@ export async function GET(req: NextRequest) {
 
   const fromDate = new Date(from);
   const toDate = new Date(to);
+  // `to` arrives as a date ("2026-04-30" = midnight UTC) — extend to the end of
+  // that UTC day so timed transactions (e.g. TNG rows) on the last day count.
+  toDate.setUTCHours(23, 59, 59, 999);
 
   // ── Helpers ──────────────────────────────────────────────────────────────────
 

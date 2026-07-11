@@ -22,13 +22,16 @@ export function formatMonth(yyyymm: string): string {
   );
 }
 
+// Local-date strings, built without toISOString(): converting local midnight to
+// UTC shifts the date back a day in UTC+8 (and today() would lag before 8am).
 export function startOfMonth(): string {
   const d = new Date();
-  return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
 }
 
 export function today(): string {
-  return new Date().toISOString().slice(0, 10);
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 // ── Timestamp helpers ──────────────────────────────────────────────────────────

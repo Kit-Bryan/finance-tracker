@@ -40,8 +40,10 @@ export async function GET(req: NextRequest) {
   else if (categoryId) conditions.push(eq(transactions.categoryId, parseInt(categoryId)));
   if (from) conditions.push(gte(transactions.postedAt, new Date(from)));
   if (to) {
+    // End of the UTC day — postedAt timestamps are stored in UTC ("statement
+    // time"), so a local-time end-of-day would cut off evening TNG rows.
     const toEnd = new Date(to);
-    toEnd.setHours(23, 59, 59, 999);
+    toEnd.setUTCHours(23, 59, 59, 999);
     conditions.push(lte(transactions.postedAt, toEnd));
   }
   if (search) {
