@@ -37,6 +37,23 @@ function isPaymentMethod(description: string, merchant: string | null): boolean 
   return PAYMENT_METHODS.some((m) => text.includes(m));
 }
 
+// Person-to-person transfers: the counterparty name says nothing about what the
+// money was FOR (dinner split one week, badminton the next). Each occurrence
+// needs to be asked individually — never assume the last category applies.
+const PERSON_TRANSFER_PATTERNS = [
+  /fund (transfer|tfr)/i,
+  /transfer (to|from) a\//i,
+  /ibk fund/i,
+  /duitnow/i,
+  /pymt (from|to) a\/c/i,
+  /instant transfer/i,
+];
+
+function isPersonTransfer(description: string, merchant: string | null): boolean {
+  if (isPaymentMethod(description, merchant)) return false; // e-wallets handled separately
+  return PERSON_TRANSFER_PATTERNS.some((re) => re.test(description));
+}
+
 interface Props {
   categories: Category[];
   onResolved: () => void;
@@ -180,7 +197,9 @@ export default function ReviewQueue({ categories, onResolved, onCategoryCreated 
             const isIncome = amt > 0;
             const conf = tx.categoryConfidence ? parseFloat(tx.categoryConfidence) : null;
             const displayName = tx.merchantNormalized || tx.description;
-            const needsHint = isPaymentMethod(tx.description, tx.merchantNormalized);
+            const isWallet = isPaymentMethod(tx.description, tx.merchantNormalized);
+            const isPerson = isPersonTransfer(tx.description, tx.merchantNormalized);
+            const needsHint = isWallet || isPerson;
             const aiSug = aiSuggestions[tx.id] ?? null;
             const isSuggesting = suggesting[tx.id] ?? false;
             const selected = selections[tx.id] ?? null;
@@ -209,7 +228,9 @@ export default function ReviewQueue({ categories, onResolved, onCategoryCreated 
                     {needsHint && (
                       <div style={{ marginTop: 8 }}>
                         <div style={{ fontSize: 11, color: "var(--accent)", marginBottom: 4 }}>
-                          💳 {displayName} is a payment method — what was this purchase for?
+                          {isPerson
+                            ? <>💸 This looks like a transfer {parseFloat(tx.amount) < 0 ? "to" : "from"} a person — what was it for?</>
+                            : <>💳 {displayName} is a payment method — what was this purchase for?</>}
                         </div>
                         <div style={{ display: "flex", gap: 6 }}>
                           <input
@@ -218,7 +239,7 @@ export default function ReviewQueue({ categories, onResolved, onCategoryCreated 
                             onChange={(e) => setHints((h) => ({ ...h, [tx.id]: e.target.value }))}
                             onKeyDown={(e) => e.key === "Enter" && getAISuggestion(tx, e.currentTarget.value)}
                             onBlur={(e) => { if (e.currentTarget.value.trim()) getAISuggestion(tx, e.currentTarget.value); }}
-                            placeholder="e.g. lunch, groceries, Grab ride…"
+                            placeholder={isPerson ? "e.g. dinner split, badminton court, movie tickets…" : "e.g. lunch, groceries, Grab ride…"}
                             style={{
                               flex: 1, background: "var(--bg-3)", border: "1px solid var(--border-2)",
                               borderRadius: 4, color: "var(--text)", fontSize: 12,
