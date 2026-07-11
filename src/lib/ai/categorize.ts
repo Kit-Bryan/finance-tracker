@@ -1,5 +1,5 @@
 import { getAIClient, DEFAULT_MODEL } from "./client";
-import { getConfirmedExamples, CategoryExample } from "./examples";
+import { getConfirmedExamples, getNoteExamples, CategoryExample } from "./examples";
 import { logger } from "@/lib/logger";
 
 const log = logger.child({ module: "ai/categorize" });
@@ -25,10 +25,14 @@ export async function bulkCategorize(
   if (transactions.length === 0) return [];
 
   const ai = getAIClient();
-  const examples = await getConfirmedExamples(40);
+  const [examples, noteExamples] = await Promise.all([getConfirmedExamples(40), getNoteExamples(15)]);
 
   const examplesBlock = examples.length > 0
     ? `\nUser's confirmed categorizations (use these for consistency):\n${examples.map((e) => `  "${e.merchant}" → ${e.categoryName}`).join("\n")}\n`
+    : "";
+
+  const notesBlock = noteExamples.length > 0
+    ? `\nThe user's existing notes on past transactions (match this tone, and REUSE the established context when a new transaction is clearly similar — e.g. a recurring counterparty or subscription):\n${noteExamples.map((e) => `  "${e.description}" → "${e.note}"`).join("\n")}\n`
     : "";
 
   const userName = process.env.USER_NAME?.trim();
@@ -40,7 +44,7 @@ export async function bulkCategorize(
 
 Available categories (use EXACTLY one of these names):
 ${categoryNames.join(", ")}
-${examplesBlock}${userBlock}
+${examplesBlock}${notesBlock}${userBlock}
 Transactions (JSON array):
 ${JSON.stringify(transactions, null, 2)}
 
@@ -52,7 +56,8 @@ Rules:
   "SHOPEE PAYMENT" → "Shopee"
   "GRAB*FOOD" → "GrabFood"
   "TNB ELECTRICITY" → "TNB"
-- If a merchant appears in the confirmed examples above, use the SAME category — do not override the user's past decisions.
+- If a merchant appears in the confirmed examples above, use the SAME category — do not override the user's past decisions. This consistency rule applies ONLY to businesses/merchants — NEVER match a person's name against the examples.
+- PERSON-TO-PERSON TRANSFERS (the counterparty is a human name): categorize by the PURPOSE stated in the remark text of the description — e.g. "Allowance" → an allowance/income category, "Birthday Dinner" → a meals/treats category, "badminton" → sports. NEVER categorize by the person's name: the same person can be a different category every single time. If the remark gives no purpose, use confidence below 0.6 so the user is asked.
 - categoryName: pick the single best match from the provided list. Use "Uncategorized" only if truly ambiguous.
 - confidence: 0.0–1.0 (set to 0.95+ when matched from confirmed examples)
 - If amount > 0 (credit/income), prefer income-related categories

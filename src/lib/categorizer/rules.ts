@@ -42,6 +42,7 @@ const GENERIC_MERCHANT_PATTERNS: RegExp[] = [
   /^interbank/,
   /^ibk\b/,
   /^transfer\b/,
+  /^pymt (from|to) a/,  // "PYMT FROM A/C GRABPAY…" / person payments — purpose varies per tx
 ];
 
 export function isGenericMerchant(normalizedName: string): boolean {
