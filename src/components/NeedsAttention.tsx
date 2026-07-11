@@ -46,7 +46,10 @@ export default function NeedsAttention() {
   const [flags, setFlags] = useState<Flag[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState<number | null>(null);
+  // Track WHICH action is running, not just which flag — otherwise the "Link"
+  // button shows "Linking…" while a dismiss on the same card is in flight.
+  const [busy, setBusy] = useState<{ id: number; action: "link" | "dismiss" | "categorize" } | null>(null);
+  const busyOn = (id: number) => busy?.id === id;
   const [selections, setSelections] = useState<Record<number, CategoryValue | null>>({});
   const [expanded, setExpanded] = useState(true);
   const [sourceFor, setSourceFor] = useState<Flag | null>(null);
@@ -66,14 +69,14 @@ export default function NeedsAttention() {
   useEffect(() => { load(); }, []);
 
   async function dismiss(flagId: number) {
-    setBusy(flagId);
+    setBusy({ id: flagId, action: "dismiss" });
     await fetch(`/api/flags/${flagId}/dismiss`, { method: "POST" });
     setFlags((prev) => prev.filter((f) => f.id !== flagId));
     setBusy(null);
   }
 
   async function linkReimbursement(flag: Flag) {
-    setBusy(flag.id);
+    setBusy({ id: flag.id, action: "link" });
     await fetch(`/api/flags/${flag.id}/resolve`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
     setFlags((prev) => prev.filter((f) => f.id !== flag.id));
     setBusy(null);
@@ -82,7 +85,7 @@ export default function NeedsAttention() {
   async function categorize(flag: Flag) {
     const cat = selections[flag.id];
     if (!cat) return;
-    setBusy(flag.id);
+    setBusy({ id: flag.id, action: "categorize" });
     await fetch(`/api/flags/${flag.id}/resolve`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -152,10 +155,12 @@ export default function NeedsAttention() {
                   {flag.batchStoredFile && (
                     <button onClick={() => setSourceFor(flag)} title="See where this appears in the original statement" style={ghostBtn}>📄</button>
                   )}
-                  <button onClick={() => linkReimbursement(flag)} disabled={busy === flag.id} style={primaryBtn(busy === flag.id)}>
-                    {busy === flag.id ? "Linking…" : "Link reimbursements"}
+                  <button onClick={() => linkReimbursement(flag)} disabled={busyOn(flag.id)} style={primaryBtn(busyOn(flag.id))}>
+                    {busy?.id === flag.id && busy.action === "link" ? "Linking…" : "Link reimbursements"}
                   </button>
-                  <button onClick={() => dismiss(flag.id)} disabled={busy === flag.id} style={ghostBtn}>Not a reimbursement</button>
+                  <button onClick={() => dismiss(flag.id)} disabled={busyOn(flag.id)} style={ghostBtn}>
+                    {busy?.id === flag.id && busy.action === "dismiss" ? "Dismissing…" : "Not a reimbursement"}
+                  </button>
                 </div>
               </div>
             );
@@ -193,10 +198,12 @@ export default function NeedsAttention() {
                   {flag.batchStoredFile && (
                     <button onClick={() => setSourceFor(flag)} title="See where this appears in the original statement" style={ghostBtn}>📄</button>
                   )}
-                  <button onClick={() => categorize(flag)} disabled={busy === flag.id || !selected} style={primaryBtn(busy === flag.id || !selected)}>
-                    {busy === flag.id ? "…" : "Confirm"}
+                  <button onClick={() => categorize(flag)} disabled={busyOn(flag.id) || !selected} style={primaryBtn(busyOn(flag.id) || !selected)}>
+                    {busy?.id === flag.id && busy.action === "categorize" ? "…" : "Confirm"}
                   </button>
-                  <button onClick={() => dismiss(flag.id)} disabled={busy === flag.id} style={ghostBtn}>Dismiss</button>
+                  <button onClick={() => dismiss(flag.id)} disabled={busyOn(flag.id)} style={ghostBtn}>
+                    {busy?.id === flag.id && busy.action === "dismiss" ? "…" : "Dismiss"}
+                  </button>
                 </div>
               </div>
             );
