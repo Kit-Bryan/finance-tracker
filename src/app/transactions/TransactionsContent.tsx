@@ -86,6 +86,9 @@ const selectStyle: React.CSSProperties = {
   color: "var(--text)", fontSize: 13, padding: "6px 10px", outline: "none", fontFamily: "inherit",
 };
 
+type SortKey = "date" | "merchant" | "category" | "account" | "amount";
+type HistSortKey = "date" | "file" | "account" | "rows";
+
 // "YYYY-MM" for the month picker when from..to exactly span one calendar month
 // (1st → last day); "" otherwise so a custom range doesn't show a misleading month.
 function monthValueFromRange(from: string, to: string): string {
@@ -136,12 +139,39 @@ export default function TransactionsContent() {
   const [sourceFor, setSourceFor] = useState<Transaction | null>(null); // source trace-back viewer
   const [syncBatchId, setSyncBatchId] = useState<number | null>(null);  // batch awaiting a PDF via the hidden input
   const syncFileRef = useRef<HTMLInputElement>(null);
+  // Column sorting — server-side so it works across pages
+  const [sortBy, setSortBy] = useState<SortKey>("date");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  // Import History sorting — client-side (the list is small)
+  const [histSort, setHistSort] = useState<HistSortKey>("date");
+  const [histDir, setHistDir] = useState<"asc" | "desc">("desc");
   const LIMIT = 50;
+
+  function toggleSort(key: SortKey) {
+    if (sortBy === key) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortBy(key);
+      setSortDir(key === "date" || key === "amount" ? "desc" : "asc"); // numbers: big first; text: A–Z
+    }
+    setPage(1);
+  }
+
+  function toggleHistSort(key: HistSortKey) {
+    if (histSort === key) {
+      setHistDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setHistSort(key);
+      setHistDir(key === "date" || key === "rows" ? "desc" : "asc");
+    }
+  }
 
   // Build query key params object
   const txFilterParams: Record<string, string | number | boolean> = {
     page,
     limit: LIMIT,
+    sort: sortBy,
+    dir: sortDir,
     ...(filters.from ? { from: filters.from } : {}),
     ...(filters.to ? { to: filters.to } : {}),
     ...(filters.accountId ? { accountId: filters.accountId } : {}),
@@ -156,7 +186,7 @@ export default function TransactionsContent() {
   const { data: txData, isLoading: loading } = useQuery<TxListData>({
     queryKey: txKey,
     queryFn: async () => {
-      const params = new URLSearchParams({ limit: String(LIMIT), page: String(page) });
+      const params = new URLSearchParams({ limit: String(LIMIT), page: String(page), sort: sortBy, dir: sortDir });
       if (filters.from) params.set("from", filters.from);
       if (filters.to) params.set("to", filters.to);
       if (filters.accountId) params.set("accountId", filters.accountId);
@@ -412,6 +442,15 @@ export default function TransactionsContent() {
   const totalExpense = txData?.totalExpense ?? 0;
   const totalPages = Math.ceil(total / LIMIT);
 
+  const sortedBatches = [...batches].sort((a, b) => {
+    const v =
+      histSort === "date" ? +new Date(a.createdAt) - +new Date(b.createdAt)
+      : histSort === "file" ? a.filename.localeCompare(b.filename)
+      : histSort === "account" ? (a.accountName ?? "").localeCompare(b.accountName ?? "")
+      : (a.importedRows ?? 0) - (b.importedRows ?? 0);
+    return histDir === "asc" ? v : -v;
+  });
+
   // The transaction shown in the detail panel: prefer the live row (stays fresh after
   // edits); fall back to a fetched out-of-range transaction.
   const detailTx =
@@ -625,9 +664,31 @@ export default function TransactionsContent() {
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead>
                   <tr style={{ borderBottom: "1px solid var(--border)" }}>
-                    {["Date", "Merchant / Description", "Category", "Account", "Amount", ""].map((h, i) => (
-                      <th key={i} style={{ padding: "10px 16px", textAlign: h === "Amount" ? "right" : "left", fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--text-muted)", fontWeight: 500 }}>{h}</th>
-                    ))}
+                    {([
+                      ["Date", "date"],
+                      ["Merchant / Description", "merchant"],
+                      ["Category", "category"],
+                      ["Account", "account"],
+                      ["Amount", "amount"],
+                      ["", null],
+                    ] as [string, SortKey | null][]).map(([h, key], i) => {
+                      const active = key !== null && sortBy === key;
+                      return (
+                        <th
+                          key={i}
+                          onClick={key ? () => toggleSort(key) : undefined}
+                          title={key ? "Sort by this column" : undefined}
+                          style={{
+                            padding: "10px 16px", textAlign: h === "Amount" ? "right" : "left",
+                            fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase",
+                            color: active ? "var(--accent)" : "var(--text-muted)", fontWeight: active ? 600 : 500,
+                            cursor: key ? "pointer" : "default", userSelect: "none", whiteSpace: "nowrap",
+                          }}
+                        >
+                          {h}{active && <span style={{ marginLeft: 4 }}>{sortDir === "asc" ? "▲" : "▼"}</span>}
+                        </th>
+                      );
+                    })}
                   </tr>
                 </thead>
                 <tbody>
@@ -772,13 +833,25 @@ export default function TransactionsContent() {
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
                 <tr style={{ borderBottom: "1px solid var(--border)" }}>
-                  {["Date", "File", "Account", "Imported", "Status", ""].map((h, i) => (
-                    <th key={i} style={{ padding: "10px 20px", textAlign: "left", fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--text-muted)", fontWeight: 500 }}>{h}</th>
-                  ))}
+                  {([
+                    ["Date", "date"], ["File", "file"], ["Account", "account"], ["Imported", "rows"], ["Status", null], ["", null],
+                  ] as [string, HistSortKey | null][]).map(([h, key], i) => {
+                    const active = key !== null && histSort === key;
+                    return (
+                      <th
+                        key={i}
+                        onClick={key ? () => toggleHistSort(key) : undefined}
+                        title={key ? "Sort by this column" : undefined}
+                        style={{ padding: "10px 20px", textAlign: "left", fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: active ? "var(--accent)" : "var(--text-muted)", fontWeight: active ? 600 : 500, cursor: key ? "pointer" : "default", userSelect: "none", whiteSpace: "nowrap" }}
+                      >
+                        {h}{active && <span style={{ marginLeft: 4 }}>{histDir === "asc" ? "▲" : "▼"}</span>}
+                      </th>
+                    );
+                  })}
                 </tr>
               </thead>
               <tbody>
-                {batches.map((b) => (
+                {sortedBatches.map((b) => (
                   <tr key={b.id} style={{ borderBottom: "1px solid var(--border)", transition: "background 0.1s" }}
                     onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-3)")}
                     onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { transactions, categories, accounts, reimbursementAllocations, importBatches } from "@/db/schema";
-import { eq, and, gte, lte, sql, desc, isNull, or, ilike } from "drizzle-orm";
+import { eq, and, gte, lte, sql, asc, desc, isNull, or, ilike } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { computeFingerprint } from "@/lib/parsers/fingerprint";
 
@@ -19,6 +19,20 @@ export async function GET(req: NextRequest) {
   const to = searchParams.get("to");
   const search = searchParams.get("search")?.trim();
   const includeHidden = searchParams.get("includeHidden") === "1";
+
+  // Column sorting. Text columns sort case-insensitively; merchant falls back to
+  // the raw description like the UI does. id desc as tiebreaker keeps pagination stable.
+  const sortKey = searchParams.get("sort") ?? "date";
+  const sortDir = searchParams.get("dir") === "asc" ? "asc" : "desc";
+  const sortCols: Record<string, ReturnType<typeof sql>> = {
+    date: sql`${transactions.postedAt}`,
+    amount: sql`${transactions.amount}`,
+    merchant: sql`lower(coalesce(${transactions.merchantNormalized}, ${transactions.description}))`,
+    category: sql`lower(coalesce(${categories.name}, ''))`,
+    account: sql`lower(coalesce(${accounts.name}, ''))`,
+  };
+  const sortCol = sortCols[sortKey] ?? sortCols.date;
+  const orderExprs = [sortDir === "asc" ? asc(sortCol) : desc(sortCol), desc(transactions.id)];
 
   const conditions = [isNull(transactions.deletedAt)];
   if (accountId) conditions.push(eq(transactions.accountId, parseInt(accountId)));
@@ -87,7 +101,7 @@ export async function GET(req: NextRequest) {
     .leftJoin(accounts, eq(transactions.accountId, accounts.id))
     .leftJoin(importBatches, eq(transactions.batchId, importBatches.id))
     .where(and(...rowConditions))
-    .orderBy(desc(transactions.postedAt))
+    .orderBy(...orderExprs)
     .limit(limit)
     .offset(offset);
 
