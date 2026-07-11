@@ -86,6 +86,16 @@ const selectStyle: React.CSSProperties = {
   color: "var(--text)", fontSize: 13, padding: "6px 10px", outline: "none", fontFamily: "inherit",
 };
 
+// "YYYY-MM" for the month picker when from..to exactly span one calendar month
+// (1st → last day); "" otherwise so a custom range doesn't show a misleading month.
+function monthValueFromRange(from: string, to: string): string {
+  const m = /^(\d{4})-(\d{2})-01$/.exec(from);
+  if (!m) return "";
+  const [, y, mo] = m;
+  const lastDay = new Date(Number(y), Number(mo), 0).getDate();
+  return to === `${y}-${mo}-${String(lastDay).padStart(2, "0")}` ? `${y}-${mo}` : "";
+}
+
 export default function TransactionsContent() {
   const searchParams = useSearchParams();
   const filterParam = searchParams.get("filter");
@@ -557,6 +567,26 @@ export default function TransactionsContent() {
         <>
           {/* Filters */}
           <div className="fade-up fade-up-2" style={{ background: "var(--bg-2)", border: "1px solid var(--border)", borderRadius: 8, padding: "14px 18px", marginBottom: 14, display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
+            {/* Month quick-select — fills From/To with the 1st..last day in one click.
+                Shows the month only while From/To exactly span one; manual edits blank it. */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <label style={labelStyle}>Month</label>
+              <input
+                type="month"
+                value={monthValueFromRange(filters.from, filters.to)}
+                onChange={(e) => {
+                  const v = e.target.value; // "YYYY-MM" or "" when cleared
+                  if (!v) return;
+                  const [y, m] = v.split("-").map(Number);
+                  const from = `${v}-01`;
+                  const to = new Date(y, m, 0); // day 0 of next month = last day of this one
+                  const toStr = `${v}-${String(to.getDate()).padStart(2, "0")}`;
+                  setFilters((f) => ({ ...f, from, to: toStr }));
+                  setPage(1);
+                }}
+                style={selectStyle}
+              />
+            </div>
             <FilterInput label="From" type="date" value={filters.from} onChange={(v) => { setFilters((f) => ({ ...f, from: v })); setPage(1); }} />
             <FilterInput label="To" type="date" value={filters.to} onChange={(v) => { setFilters((f) => ({ ...f, to: v })); setPage(1); }} />
             <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
