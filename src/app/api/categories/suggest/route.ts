@@ -40,7 +40,6 @@ Return ONLY valid JSON (no markdown):
   const resp = await ai.chat.completions.create({
     model: DEFAULT_MODEL,
     messages: [{ role: "user", content: prompt }],
-    temperature: 0,
   });
 
   const text = resp.choices[0]?.message?.content ?? "{}";

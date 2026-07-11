@@ -691,7 +691,6 @@ Guidelines:
       messages,
       tools: TOOLS,
       tool_choice: "auto",
-      temperature: 0.3,
     });
 
     const msg = resp.choices[0]?.message;

@@ -70,7 +70,6 @@ Return ONLY valid JSON (no markdown, no explanation):
   const resp = await ai.chat.completions.create({
     model: DEFAULT_MODEL,
     messages: [{ role: "user", content: prompt }],
-    temperature: 0,
   });
 
   const text = resp.choices[0]?.message?.content ?? "{}";
@@ -191,7 +190,6 @@ ${buildStatementSpec(false)}`;
     resp = await ai.chat.completions.create({
       model: DEFAULT_MODEL,
       messages: [{ role: "user", content: prompt }],
-      temperature: 0,
     });
   } catch (err) {
     log.error({ err, model: DEFAULT_MODEL, chars: truncatedText.length }, "PDF statement LLM call failed");
@@ -227,7 +225,6 @@ ${buildStatementSpec(true)}`;
     resp = await ai.chat.completions.create({
       model: DEFAULT_MODEL,
       messages: [{ role: "user", content }],
-      temperature: 0,
     });
   } catch (err) {
     log.error({ err, model: DEFAULT_MODEL, images: imageDataUrls.length }, "image statement (vision) LLM call failed");
@@ -275,7 +272,6 @@ Return ONLY valid JSON (no markdown):
     const resp = await ai.chat.completions.create({
       model: DEFAULT_MODEL,
       messages: [{ role: "user", content: prompt }],
-      temperature: 0,
     });
     const json = (resp.choices[0]?.message?.content ?? "{}").replace(/```(?:json)?/g, "").trim();
     const parsed = JSON.parse(json);

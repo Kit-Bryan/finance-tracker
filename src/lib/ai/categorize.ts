@@ -81,7 +81,6 @@ Return ONLY a JSON array (no markdown):
     resp = await ai.chat.completions.create({
       model: DEFAULT_MODEL,
       messages: [{ role: "user", content: prompt }],
-      temperature: 0,
     });
   } catch (err) {
     log.error({ err, model: DEFAULT_MODEL, count: transactions.length }, "bulk categorize LLM call failed");

@@ -27,7 +27,8 @@ export function getAIClient(): OpenAI {
   return _client;
 }
 
-// Default model: gpt-5.4-mini — accurate on statement parsing (text + vision) and cheap.
+// Default model: gpt-5.5. Note: this model does not support the `temperature`
+// parameter, so no call site sets it.
 // (gpt-5.4-nano was tested and got transaction signs/amounts wrong, so it's avoided.)
 // Override via the AI_MODEL env var (a blank value falls back to the default).
-export const DEFAULT_MODEL = process.env.AI_MODEL?.trim() || "gpt-5.4-mini";
+export const DEFAULT_MODEL = process.env.AI_MODEL?.trim() || "gpt-5.5";

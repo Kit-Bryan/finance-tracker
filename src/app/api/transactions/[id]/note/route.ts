@@ -57,7 +57,6 @@ Return ONLY the note text or an empty string. No quotes, no explanation.`;
   const resp = await ai.chat.completions.create({
     model: DEFAULT_MODEL,
     messages: [{ role: "user", content: prompt }],
-    temperature: 0.3,
   });
 
   const note = resp.choices[0]?.message?.content?.trim() ?? "";
