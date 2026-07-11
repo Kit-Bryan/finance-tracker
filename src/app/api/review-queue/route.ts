@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
-import { transactions, categories, accounts } from "@/db/schema";
-import { eq, and, isNull, lt, or, not } from "drizzle-orm";
+import { transactions, categories, accounts, reimbursementAllocations } from "@/db/schema";
+import { eq, and, isNull, lt, or, sql } from "drizzle-orm";
 import { CONFIDENCE_THRESHOLD } from "@/lib/ai/constants";
 
 export async function GET() {
@@ -27,7 +27,11 @@ export async function GET() {
     .where(
       and(
         isNull(transactions.deletedAt),
-        isNull(transactions.reimbursementForId), // linked repayments don't need categorizing
+        isNull(transactions.reimbursementForId), // legacy single-link repayments don't need categorizing
+        // Allocated repayments (reimbursement_allocations is the current source of
+        // truth) don't need categorizing either — insights nets them against their
+        // expenses. Without this they reappear in the queue after every refresh.
+        sql`not exists (select 1 from ${reimbursementAllocations} a where a.repayment_id = ${transactions.id})`,
         or(
           isNull(transactions.categoryId),
           and(
