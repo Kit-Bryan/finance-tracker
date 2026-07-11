@@ -96,7 +96,11 @@ export async function POST(req: NextRequest) {
           fingerprint: row.fingerprint,
           categorySource: catResult.source,
           categoryConfidence: catResult.confidence > 0 ? String(catResult.confidence) : null,
+          // GO+ internal legs (reload from / cash out to GO+) are wallet churn, not
+          // real income/expense: hide them from the list AND mark them as transfers
+          // so insights excludes them deterministically (not AI-categorization-dependent).
           hidden: isGoPlusNoise(row.description),
+          isTransfer: isGoPlusNoise(row.description),
           rawRow: { date: row.date, time: row.time, description: row.description, amount: row.amount },
         })
         .onConflictDoNothing()

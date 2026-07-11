@@ -48,6 +48,7 @@ export async function POST(req: NextRequest) {
         categorySource: catResult.source,
         categoryConfidence: catResult.confidence > 0 ? String(catResult.confidence) : null,
         hidden: isGoPlusNoise(row.description),
+        isTransfer: isGoPlusNoise(row.description),
         rawRow: { date: row.date, time: row.time, description: row.description, amount: row.amount },
       });
       imported++;
