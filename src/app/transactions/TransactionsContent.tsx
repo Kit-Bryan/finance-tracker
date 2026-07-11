@@ -141,7 +141,6 @@ export default function TransactionsContent() {
   const [agentOpen, setAgentOpen] = useState(false);
   const [agentContext, setAgentContext] = useState<ContextTransaction | null>(null);
   const [moreOpen, setMoreOpen] = useState(false);   // header "⋯ More" menu
-  const [kebabFor, setKebabFor] = useState<number | null>(null);  // per-row "⋯" menu
   const [sourceFor, setSourceFor] = useState<Transaction | null>(null); // source trace-back viewer
   const [syncBatchId, setSyncBatchId] = useState<number | null>(null);  // batch awaiting a PDF via the hidden input
   const syncFileRef = useRef<HTMLInputElement>(null);
@@ -292,11 +291,11 @@ export default function TransactionsContent() {
 
   // ── Close popover menus on any outside click ───────────────────────────────
   useEffect(() => {
-    if (!moreOpen && kebabFor == null) return;
-    const close = () => { setMoreOpen(false); setKebabFor(null); };
+    if (!moreOpen) return;
+    const close = () => setMoreOpen(false);
     window.addEventListener("click", close);
     return () => window.removeEventListener("click", close);
-  }, [moreOpen, kebabFor]);
+  }, [moreOpen]);
 
   // ── Mutations ─────────────────────────────────────────────────────────────
 
@@ -705,6 +704,9 @@ export default function TransactionsContent() {
             ) : transactions.length === 0 ? (
               <div style={{ padding: 60, textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>No transactions match these filters.</div>
             ) : (
+              // overflow-x: worst case the table scrolls sideways instead of
+              // clipping the Amount column off the right edge
+              <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead>
                   <tr style={{ borderBottom: "1px solid var(--border)" }}>
@@ -714,7 +716,6 @@ export default function TransactionsContent() {
                       ["Category", "category"],
                       ["Account", "account"],
                       ["Amount", "amount"],
-                      ["", null],
                     ] as [string, SortKey | null][]).map(([h, key], i) => {
                       const active = key !== null && sortBy === key;
                       return (
@@ -820,39 +821,12 @@ export default function TransactionsContent() {
                           )}
                         </td>
 
-                        {/* Per-row kebab — quick actions (full set lives in the detail panel) */}
-                        <td style={{ padding: "10px 12px", whiteSpace: "nowrap", textAlign: "right" }} onClick={(e) => e.stopPropagation()}>
-                          <div style={{ position: "relative", display: "inline-block" }}>
-                            <button
-                              className="row-kebab"
-                              title="Quick actions"
-                              onClick={(e) => { e.stopPropagation(); setKebabFor(kebabFor === tx.id ? null : tx.id); }}
-                              style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 16, padding: "2px 6px", borderRadius: 4, lineHeight: 1 }}
-                            >
-                              ⋯
-                            </button>
-                            {kebabFor === tx.id && (
-                              <div style={{ position: "absolute", top: "calc(100% + 4px)", right: 0, zIndex: 40, minWidth: 150, background: "var(--bg-2)", border: "1px solid var(--border-2)", borderRadius: 8, padding: 6, boxShadow: "0 8px 28px #00000055", textAlign: "left" }}>
-                                {tx.batchStoredFile && (
-                                  <MenuItem onClick={() => { setSourceFor(tx); setKebabFor(null); }}>
-                                    📄 View in statement
-                                  </MenuItem>
-                                )}
-                                <MenuItem onClick={() => { toggleHiddenMutation.mutate({ id: tx.id, hidden: !tx.hidden }); setKebabFor(null); }}>
-                                  {tx.hidden ? "Unhide" : "Hide from list"}
-                                </MenuItem>
-                                <MenuItem danger onClick={() => { setConfirmDelete(tx); setKebabFor(null); }}>
-                                  Delete
-                                </MenuItem>
-                              </div>
-                            )}
-                          </div>
-                        </td>
                       </tr>
                     );
                   })}
                 </tbody>
               </table>
+              </div>
             )}
 
             {totalPages > 1 && (
@@ -1055,6 +1029,11 @@ export default function TransactionsContent() {
         onSplit={(tx) => setSplitFor(tx)}
         refreshKey={allocVersion}
         onOpenLinked={(id) => openDetail(id)}
+        onViewSource={
+          detailTx && (detailTx as Transaction).batchStoredFile
+            ? () => setSourceFor(detailTx as Transaction)
+            : undefined
+        }
         hidingBusy={toggleHiddenMutation.isPending}
       />
 
@@ -1131,9 +1110,6 @@ export default function TransactionsContent() {
       )}
 
       <style>{`
-        .row-kebab { opacity: 0; transition: opacity 0.15s; }
-        tr:hover .row-kebab { opacity: 1; }
-        .row-kebab:hover { background: var(--bg-2) !important; color: var(--text) !important; }
       `}</style>
     </div>
   );

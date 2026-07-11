@@ -39,6 +39,8 @@ interface Props {
   onAllocate: (tx: DetailTransaction) => void;
   onSplit: (tx: DetailTransaction) => void;
   onOpenLinked: (id: number) => void;
+  // Source trace-back — provided only when the batch's original statement is stored
+  onViewSource?: (tx: DetailTransaction) => void;
   hidingBusy?: boolean;
 }
 
@@ -48,7 +50,7 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 
 export default function TransactionEditPanel({
   transaction: tx, categories, refreshKey, onClose, onSaved, onCategoryCreated,
-  onAskAI, onToggleHidden, onDelete, onAllocate, onSplit, onOpenLinked, hidingBusy,
+  onAskAI, onToggleHidden, onDelete, onAllocate, onSplit, onOpenLinked, onViewSource, hidingBusy,
 }: Props) {
   const [description, setDescription] = useState("");
   const [date, setDate] = useState("");
@@ -220,6 +222,7 @@ export default function TransactionEditPanel({
 
           {/* Secondary actions */}
           <div style={{ borderTop: "1px solid var(--border)", paddingTop: 14, display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {onViewSource && <SecondaryBtn onClick={() => onViewSource(tx)}>📄 View in statement</SecondaryBtn>}
             <SecondaryBtn onClick={() => onSplit(tx)}>Split</SecondaryBtn>
             <SecondaryBtn onClick={() => onAskAI(tx)} color="var(--accent)">✦ Ask AI</SecondaryBtn>
             <SecondaryBtn onClick={() => onToggleHidden(tx)} disabled={hidingBusy}>{tx.hidden ? "Unhide" : "Hide from list"}</SecondaryBtn>
