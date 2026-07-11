@@ -577,7 +577,13 @@ export default function ImportPage() {
             {/* Parsed transactions table */}
             <div style={{ background: "var(--bg-2)", border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden" }}>
               <div style={{ maxHeight: splitView ? 700 : 420, overflowY: "auto" }}>
-                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                {/* Fixed layout: descriptions truncate instead of pushing the Amount column out of view */}
+                <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
+                  <colgroup>
+                    <col style={{ width: 150 }} />
+                    <col />
+                    <col style={{ width: 140 }} />
+                  </colgroup>
                   <thead style={{ position: "sticky", top: 0, background: "var(--bg-2)", zIndex: 1 }}>
                     <tr style={{ borderBottom: "1px solid var(--border)" }}>
                       {["Date", "Description", "Amount"].map((h) => (

@@ -707,7 +707,15 @@ export default function TransactionsContent() {
               // overflow-x: worst case the table scrolls sideways instead of
               // clipping the Amount column off the right edge
               <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              {/* Fixed layout: long merchant/account text truncates instead of pushing Amount off-screen */}
+              <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
+                <colgroup>
+                  <col style={{ width: 110 }} />
+                  <col />
+                  <col style={{ width: 200 }} />
+                  <col style={{ width: 150 }} />
+                  <col style={{ width: 145 }} />
+                </colgroup>
                 <thead>
                   <tr style={{ borderBottom: "1px solid var(--border)" }}>
                     {([
@@ -792,7 +800,7 @@ export default function TransactionsContent() {
                           {isRepayment
                             ? <span title={`Repayment netted into your expenses — only the unallocated remainder counts as income`} style={{ fontSize: 11, padding: "2px 8px", borderRadius: 3, background: "var(--accent-dim)", color: "var(--accent)", whiteSpace: "nowrap", maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", display: "inline-block", verticalAlign: "bottom" }}>↩ Repayment{tx.primaryTargetName ? ` → ${tx.primaryTargetName}` : ""}{tx.allocationCount > 1 ? ` +${tx.allocationCount - 1}` : ""}</span>
                             : tx.categoryName
-                              ? <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 3, background: (tx.categoryColor ?? "#888") + "22", color: tx.categoryColor ?? "var(--text-muted)", whiteSpace: "nowrap" }}>
+                              ? <span title={`${tx.parentCategoryName ? tx.parentCategoryName + " › " : ""}${tx.categoryName}`} style={{ fontSize: 11, padding: "2px 8px", borderRadius: 3, background: (tx.categoryColor ?? "#888") + "22", color: tx.categoryColor ?? "var(--text-muted)", whiteSpace: "nowrap", maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", display: "inline-block", verticalAlign: "bottom" }}>
                                   {tx.parentCategoryName && <span style={{ opacity: 0.6 }}>{tx.parentCategoryName} › </span>}
                                   {tx.categoryName}
                                 </span>
@@ -800,7 +808,7 @@ export default function TransactionsContent() {
                         </td>
 
                         {/* Account */}
-                        <td style={{ padding: "10px 16px", fontSize: 12, color: "var(--text-muted)", whiteSpace: "nowrap" }}>{tx.accountName ?? "—"}</td>
+                        <td title={tx.accountName ?? undefined} style={{ padding: "10px 16px", fontSize: 12, color: "var(--text-muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{tx.accountName ?? "—"}</td>
 
                         {/* Amount (net for repaid expenses) */}
                         <td style={{ padding: "10px 16px", textAlign: "right", fontFamily: "var(--font-ibm-mono)", whiteSpace: "nowrap" }}>
