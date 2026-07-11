@@ -132,7 +132,7 @@ export default function AllocationEditor({ repayment, onClose, onSaved }: {
           {loading ? (
             [...Array(4)].map((_, i) => <div key={i} className="skeleton" style={{ height: 48, borderRadius: 6 }} />)
           ) : filtered.length === 0 ? (
-            <div style={{ padding: 20, textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>No nearby expenses (±21 days) to link to.</div>
+            <div style={{ padding: 20, textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>No nearby expenses (90 days back, 30 ahead) to link to.</div>
           ) : filtered.map((c) => {
             const val = alloc[c.id] ?? "";
             const active = (parseFloat(val) || 0) > 0;

@@ -5,7 +5,11 @@ import { transactions, categories, reimbursementAllocations } from "@/db/schema"
 import { logger } from "@/lib/logger";
 
 const log = logger.child({ route: "transactions/reimburse" });
-const WINDOW_DAYS = 21;
+// How far around the repayment date to look for candidate expenses. Wide on the
+// past side (people repay late — trips especially), narrower ahead (an expense
+// rarely postdates its repayment by much).
+const WINDOW_DAYS_BACK = 90;
+const WINDOW_DAYS_AHEAD = 30;
 
 interface CandidateRow {
   id: number;
@@ -19,9 +23,9 @@ interface CandidateRow {
 
 // GET — everything the allocation editor needs for THIS repayment:
 //  - the repayment's amount + how much is already allocated / left
-//  - candidate expenses (±21d, amount < 0) plus any already-linked expense (even if
-//    outside the window), each with its full cost, how much others repaid, and how
-//    much THIS repayment currently applies to it.
+//  - candidate expenses (window above, amount < 0) plus any already-linked expense
+//    (even if outside the window), each with its full cost, how much others repaid,
+//    and how much THIS repayment currently applies to it.
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -33,8 +37,8 @@ export async function GET(
   if (!tx) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const center = new Date(tx.postedAt);
-  const from = new Date(center); from.setDate(from.getDate() - WINDOW_DAYS);
-  const to = new Date(center); to.setDate(to.getDate() + WINDOW_DAYS);
+  const from = new Date(center); from.setDate(from.getDate() - WINDOW_DAYS_BACK);
+  const to = new Date(center); to.setDate(to.getDate() + WINDOW_DAYS_AHEAD);
 
   const windowRows = await db
     .select({
@@ -57,7 +61,7 @@ export async function GET(
       )
     )
     .orderBy(desc(transactions.postedAt))
-    .limit(100);
+    .limit(300);
 
   // Only expenses (negative) can be reimbursed.
   const candidates: CandidateRow[] = windowRows.filter((r) => parseFloat(r.amount as string) < 0) as CandidateRow[];
