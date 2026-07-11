@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { importBatches, transactions, transactionsStaging } from "@/db/schema";
 import { pruneOrphanMerchants } from "@/lib/categorizer/rules";
+import { deleteBatchFile } from "@/lib/uploads";
 
 export async function DELETE(
   _req: NextRequest,
@@ -23,11 +24,13 @@ export async function DELETE(
     .where(eq(transactions.batchId, batchId))
     .returning({ id: transactions.id, description: transactions.description });
 
-  // Soft-delete the batch itself
+  // Soft-delete the batch itself and remove its stored original file —
+  // undoing an import should not leave bank statements on disk.
   await db
     .update(importBatches)
-    .set({ deletedAt: now })
+    .set({ deletedAt: now, storedFile: null })
     .where(eq(importBatches.id, batchId));
+  await deleteBatchFile(batch.storedFile);
 
   // Forget merchant memory for any merchants no live transaction still backs
   await pruneOrphanMerchants(softDeleted.map((t) => t.description));

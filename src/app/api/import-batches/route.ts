@@ -8,6 +8,7 @@ export async function GET() {
     .select({
       id: importBatches.id,
       filename: importBatches.filename,
+      storedFile: importBatches.storedFile,
       status: importBatches.status,
       totalRows: importBatches.totalRows,
       importedRows: importBatches.importedRows,

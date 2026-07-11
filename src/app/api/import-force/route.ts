@@ -49,7 +49,7 @@ export async function POST(req: NextRequest) {
         categoryConfidence: catResult.confidence > 0 ? String(catResult.confidence) : null,
         hidden: isGoPlusNoise(row.description),
         isTransfer: isGoPlusNoise(row.description),
-        rawRow: { date: row.date, time: row.time, description: row.description, amount: row.amount },
+        rawRow: { date: row.date, time: row.time, description: row.description, amount: row.amount, page: row.page, yPercent: row.yPercent },
       });
       imported++;
       results.push(true);

@@ -14,6 +14,7 @@ import { categories } from "@/db/schema";
 import { PreviewRow } from "@/app/api/parse-preview/route";
 import { runAllDetectors } from "@/lib/flags/detect";
 import { combinePostedAt } from "@/lib/format";
+import { saveBatchFile } from "@/lib/uploads";
 import { logger } from "@/lib/logger";
 
 interface ConfirmBody {
@@ -31,7 +32,19 @@ interface ConfirmBody {
 
 export async function POST(req: NextRequest) {
   const log = logger.child({ route: "import-confirm" });
-  const body: ConfirmBody = await req.json();
+
+  // Multipart: `payload` (JSON) + optional `file` (the original statement, stored
+  // for source trace-back). Plain JSON bodies still work (no file stored).
+  let body: ConfirmBody;
+  let originalFile: File | null = null;
+  const contentType = req.headers.get("content-type") ?? "";
+  if (contentType.includes("multipart/form-data")) {
+    const fd = await req.formData();
+    body = JSON.parse((fd.get("payload") as string) ?? "{}");
+    originalFile = fd.get("file") as File | null;
+  } else {
+    body = await req.json();
+  }
   const { accountId, filename, rows, saveProfile, profileId } = body;
 
   if (!accountId || !filename || !rows?.length) {
@@ -59,6 +72,17 @@ export async function POST(req: NextRequest) {
       totalRows: rows.length,
     })
     .returning();
+
+  // Keep the original statement so transactions can be traced back to their
+  // exact spot in the source document. Non-fatal if it fails.
+  if (originalFile) {
+    try {
+      const stored = await saveBatchFile(batch.id, filename, Buffer.from(await originalFile.arrayBuffer()));
+      await db.update(importBatches).set({ storedFile: stored }).where(eq(importBatches.id, batch.id));
+    } catch (err) {
+      log.warn({ err, batchId: batch.id }, "could not store original statement file");
+    }
+  }
 
   // Insert staging rows
   const validRows = rows.filter((r) => !r.parseError && r.fingerprint);
@@ -101,7 +125,8 @@ export async function POST(req: NextRequest) {
           // so insights excludes them deterministically (not AI-categorization-dependent).
           hidden: isGoPlusNoise(row.description),
           isTransfer: isGoPlusNoise(row.description),
-          rawRow: { date: row.date, time: row.time, description: row.description, amount: row.amount },
+          // page/yPercent locate this row on the stored original for trace-back
+          rawRow: { date: row.date, time: row.time, description: row.description, amount: row.amount, page: row.page, yPercent: row.yPercent },
         })
         .onConflictDoNothing()
         .returning();

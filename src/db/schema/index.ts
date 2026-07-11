@@ -47,6 +47,9 @@ export const importBatches = pgTable("import_batches", {
     .references(() => accounts.id),
   profileId: integer("profile_id").references(() => importProfiles.id),
   filename: varchar("filename", { length: 500 }).notNull(),
+  // Relative path (under uploads/) of the stored original statement, kept for
+  // source trace-back. Null for batches imported before this feature existed.
+  storedFile: varchar("stored_file", { length: 500 }),
   status: varchar("status", { length: 50 }).notNull().default("pending"),
   totalRows: integer("total_rows").default(0),
   importedRows: integer("imported_rows").default(0),

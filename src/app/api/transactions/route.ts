@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { transactions, categories, accounts, reimbursementAllocations } from "@/db/schema";
+import { transactions, categories, accounts, reimbursementAllocations, importBatches } from "@/db/schema";
 import { eq, and, gte, lte, sql, desc, isNull, or, ilike } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { computeFingerprint } from "@/lib/parsers/fingerprint";
@@ -74,11 +74,18 @@ export async function GET(req: NextRequest) {
         where a.repayment_id = ${transactions.id} order by a.id limit 1
       )`,
       notes: transactions.notes,
+      // Source trace-back: which import batch this came from, whether its
+      // original file is stored, and where on the document this row sits.
+      batchId: transactions.batchId,
+      batchStoredFile: importBatches.storedFile,
+      sourcePage: sql<number | null>`(${transactions.rawRow}->>'page')::int`,
+      sourceYPercent: sql<number | null>`(${transactions.rawRow}->>'yPercent')::float`,
     })
     .from(transactions)
     .leftJoin(categories, eq(transactions.categoryId, categories.id))
     .leftJoin(parentCat, eq(categories.parentId, parentCat.id))
     .leftJoin(accounts, eq(transactions.accountId, accounts.id))
+    .leftJoin(importBatches, eq(transactions.batchId, importBatches.id))
     .where(and(...rowConditions))
     .orderBy(desc(transactions.postedAt))
     .limit(limit)

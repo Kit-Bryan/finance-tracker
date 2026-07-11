@@ -5,6 +5,7 @@ import {
 } from "@/db/schema";
 import { inArray, eq, isNull, and, count } from "drizzle-orm";
 import { pruneOrphanMerchants } from "@/lib/categorizer/rules";
+import { deleteBatchFile } from "@/lib/uploads";
 
 /**
  * Permanently delete transactions and all rows that reference them.
@@ -64,11 +65,17 @@ export async function permanentlyDeleteTransactions(ids: number[]): Promise<numb
 
     if (Number(remaining) === 0) {
       // All live transactions for this batch are gone — remove the raw staging
-      // rows and soft-delete the batch so it drops out of Import History
+      // rows, the stored original statement file, and soft-delete the batch so
+      // it drops out of Import History
       await db.delete(transactionsStaging).where(eq(transactionsStaging.batchId, batchId));
+      const [batch] = await db
+        .select({ storedFile: importBatches.storedFile })
+        .from(importBatches)
+        .where(eq(importBatches.id, batchId));
+      await deleteBatchFile(batch?.storedFile);
       await db
         .update(importBatches)
-        .set({ deletedAt: new Date() })
+        .set({ deletedAt: new Date(), storedFile: null })
         .where(eq(importBatches.id, batchId));
     }
   }
