@@ -212,29 +212,18 @@ export default function CategoriesPage() {
 
   // ── Copy / export ──────────────────────────────────────────────────────────
 
-  // Follows the current sort order. Parent lines show rolled-up numbers
-  // (what the collapsed UI shows); children show their own.
+  // Names only — just the parent/subcategory structure, in the current sort order.
   function buildText(): string {
-    return parents.map((p) => {
-      const roll = rollup(p);
-      const head = `${p.name} — ${roll.count} tx, ${formatCurrency(roll.total, "MYR")}`;
-      const kids = childrenOf(p.id).map((k) => `  ${k.name} — ${k.txCount} tx, ${formatCurrency(k.total, "MYR")}`);
-      return [head, ...kids].join("\n");
-    }).join("\n");
+    return parents.map((p) =>
+      [p.name, ...childrenOf(p.id).map((k) => `  ${k.name}`)].join("\n")
+    ).join("\n");
   }
 
   function buildJson(): string {
-    const tree = parents.map((p) => {
-      const roll = rollup(p);
-      return {
-        name: p.name,
-        color: p.color,
-        txCount: p.txCount,
-        total: p.total,
-        rolledUp: { txCount: roll.count, total: +roll.total.toFixed(2) },
-        children: childrenOf(p.id).map((k) => ({ name: k.name, color: k.color, txCount: k.txCount, total: k.total })),
-      };
-    });
+    const tree = parents.map((p) => ({
+      name: p.name,
+      children: childrenOf(p.id).map((k) => k.name),
+    }));
     return JSON.stringify(tree, null, 2);
   }
 
