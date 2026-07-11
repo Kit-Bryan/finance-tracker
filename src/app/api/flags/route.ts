@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
-import { flags, transactions, categories, accounts } from "@/db/schema";
-import { and, eq, inArray, isNull, desc } from "drizzle-orm";
+import { flags, transactions, categories, accounts, reimbursementAllocations } from "@/db/schema";
+import { eq, inArray, desc, sql } from "drizzle-orm";
 import { CONFIDENCE_THRESHOLD } from "@/lib/ai/constants";
 
 // GET /api/flags — open flags joined with their transaction.
@@ -21,6 +21,9 @@ export async function GET() {
       txCategorySource: transactions.categorySource,
       txCategoryConfidence: transactions.categoryConfidence,
       txReimbursementForId: transactions.reimbursementForId,
+      // Allocation-table links (current mechanism; reimbursementForId is legacy)
+      isAllocatedRepayment: sql<boolean>`exists (select 1 from ${reimbursementAllocations} a where a.repayment_id = ${transactions.id})`,
+      hasIncomingAllocations: sql<boolean>`exists (select 1 from ${reimbursementAllocations} a where a.expense_id = ${transactions.id})`,
       postedAt: transactions.postedAt,
       description: transactions.description,
       merchantNormalized: transactions.merchantNormalized,
@@ -51,8 +54,12 @@ export async function GET() {
         f.txCategoryConfidence != null &&
         parseFloat(f.txCategoryConfidence as string) >= CONFIDENCE_THRESHOLD
       ) stale = true;
+      // An allocated repayment doesn't need a category — insights nets it
+      // against its expenses. Without this, its low-confidence flag nags forever.
+      else if (f.isAllocatedRepayment) stale = true;
     } else if (f.type === "reimbursement") {
-      if (f.txReimbursementForId != null) stale = true; // expense itself was linked elsewhere
+      if (f.txReimbursementForId != null) stale = true;          // legacy single link
+      else if (f.isAllocatedRepayment || f.hasIncomingAllocations) stale = true; // allocation-table links (either side)
     }
     if (stale) staleIds.push(f.id);
     else live.push(f);
